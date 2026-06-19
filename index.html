@@ -2466,4 +2466,2472 @@ window.addEventListener('load', () => {
 </div><!-- end page-newsletter -->
 
 </body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Association - Full Email Analytics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+    // ===== GOOGLE SHEETS CONFIG =====
+    const SHEET_ID = '1cCDQWBuPU7bcq_690xhB2xHxRSvEGDyZ0f2S9cONS_8';
+    const SHEETS = { tag_emails:'tag_emails', newsletter:'newsletter', forms:'forms', contacts:'contacts' };
+    function sheetCSVUrl(tabName) {
+        return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+    }
+    const REFRESH_MS = 2 * 60 * 60 * 1000;
+
+    let gTagEmails=[], gNewsletter=[], gForms=[], gContacts=[];
+    let dataLoaded=false, lastRefresh=null;
+
+    // Splits raw CSV text into rows, respecting quoted fields that may contain
+    // embedded commas or newlines (Google Sheets CSV export can produce these).
+    function splitCSVRows(text) {
+        const rows=[]; let row=[]; let cur=''; let inQ=false;
+        for(let i=0;i<text.length;i++){
+            const c=text[i];
+            if(c==='"'){
+                if(inQ && text[i+1]==='"'){ cur+='"'; i++; continue; }
+                inQ=!inQ; continue;
+            }
+            if(c===','&&!inQ){ row.push(cur); cur=''; continue; }
+            if((c==='\n'||c==='\r')&&!inQ){
+                if(c==='\r'&&text[i+1]==='\n') i++;
+                row.push(cur); cur='';
+                if(row.length>1||row[0]!=='') rows.push(row);
+                row=[]; continue;
+            }
+            cur+=c;
+        }
+        if(cur!==''||row.length){ row.push(cur); rows.push(row); }
+        return rows;
+    }
+    function parseSheetCSV(text) {
+        const rows=splitCSVRows(text.trim());
+        if(rows.length<2)return[];
+        const headers=rows[0].map(h=>h.trim());
+        return rows.slice(1).map(vals=>{
+            const obj={};
+            headers.forEach((h,i)=>obj[h]=(vals[i]||'').trim());
+            return obj;
+        }).filter(r=>Object.values(r).some(v=>v));
+    }
+    async function fetchSheet(tabName) {
+        const res=await fetch(sheetCSVUrl(tabName));
+        if(!res.ok)throw new Error('Failed: '+tabName);
+        return parseSheetCSV(await res.text());
+    }
+    async function loadAllData() {
+        showLoadingBanner('Loading data from Google Sheets...');
+        try {
+            const [te,nl,fm,ct]=await Promise.all([
+                fetchSheet(SHEETS.tag_emails), fetchSheet(SHEETS.newsletter),
+                fetchSheet(SHEETS.forms), fetchSheet(SHEETS.contacts)
+            ]);
+            gTagEmails=te; gNewsletter=nl; gForms=fm; gContacts=ct;
+            dataLoaded=true; lastRefresh=new Date();
+            rebuildCoreData();
+            updateRefreshBadge(); hideLoadingBanner(); refreshCurrentPage();
+        } catch(e) {
+            hideLoadingBanner();
+            showErrorBanner('Data load failed. Check Sheet is public.');
+            console.error(e);
+        }
+    }
+    function refreshCurrentPage() {
+        const active=document.querySelector('[id^="page-"].visible');
+        if(!active)return; const pid=active.id;
+        if(pid==='page-home')renderHome();
+        if(pid==='page-signup'){renderSignupKPIs();drawDonut2();renderRecipients();renderOrgs();}
+        if(pid==='page-nurturing')renderNurturing();
+        if(pid==='page-category'&&currentCategory)showCategory(currentCategory);
+        if(pid==='page-eventoccur'&&currentEOName)showEventOccur(currentEOName,currentEOTag,currentEOColor);
+        if(pid==='page-registration'&&currentRegName)showRegistration(currentRegName);
+        if(pid==='page-newsletter')renderNewsletter();
+    }
+    function showLoadingBanner(msg){
+        let b=document.getElementById('_loadBanner');
+        if(!b){b=document.createElement('div');b.id='_loadBanner';
+        b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#1e40af;color:#fff;text-align:center;font-size:12px;padding:6px;font-weight:600;';
+        document.body.appendChild(b);}
+        b.textContent=msg;b.style.display='block';
+    }
+    function hideLoadingBanner(){const b=document.getElementById('_loadBanner');if(b)b.style.display='none';}
+    function showErrorBanner(msg){
+        let b=document.getElementById('_errBanner');
+        if(!b){b=document.createElement('div');b.id='_errBanner';
+        b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#991b1b;color:#fff;text-align:center;font-size:12px;padding:6px;font-weight:600;cursor:pointer;';
+        b.onclick=()=>b.style.display='none';document.body.appendChild(b);}
+        b.textContent=msg+' (click to dismiss)';b.style.display='block';
+    }
+    function updateRefreshBadge(){
+        const el=document.getElementById('lastRefreshTime');
+        if(el&&lastRefresh)el.textContent='Updated: '+lastRefresh.toLocaleTimeString();
+    }
+    function rowStats(rows){
+        const sent=rows.length;
+        // NOTE: the "Read" column in the sheet is always "Yes" (it just means the email
+        // was queued/triggered to be tracked) — it does NOT mean the recipient opened it.
+        // The real "opened" signal is whether "Date read" has a value.
+        const opened=rows.filter(r=>(r['Date read']||'').trim()!=='').length;
+        const clicked=rows.filter(r=>(r['Clicked']||'').toLowerCase()==='yes').length;
+        const bounced=rows.filter(r=>(r['Bounced']||'').toLowerCase()==='yes').length;
+        const notOpen=sent-opened;
+        const domains=new Set(rows.map(r=>{
+            const e=r['Email address']||r['Contact Contact Primary Email']||'';
+            return e.split('@')[1];
+        }).filter(Boolean));
+        return{sent,opened,clicked,bounced,notOpen,orgs:domains.size};
+    }
+    function pct(a,b){return b?((a/b)*100).toFixed(1)+'%':'0%';}
+    function makeRecipientRows(rows){
+        return rows.map(r=>({
+            email: r['Email address']||r['Contact Contact Primary Email']||'',
+            sent:  r['Date sent']||'',
+            read:  (r['Date read']||'').trim()!==''?'Yes':'No',
+            clicked:(r['Clicked']||'').toLowerCase()==='yes'?'Yes':'No'
+        }));
+    }
+    </script>
+    <style>
+        body { background-color: #12141c; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { background-color: #1a1d26; }
+        .card-bg { background-color: #1a1d26; }
+        .orange-text { color: #e8533a; }
+        .style-scrollbar::-webkit-scrollbar { width: 6px; }
+        .style-scrollbar::-webkit-scrollbar-track { background: #161920; border-radius: 4px; }
+        .style-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .style-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .nav-link { display:flex; align-items:center; gap:12px; font-size:14px; font-weight:500; color:#d1d5db; padding:8px 12px; border-radius:8px; transition:all 0.15s; cursor:pointer; text-decoration:none; }
+        .nav-link:hover { color:#fff; background:rgba(255,255,255,0.05); }
+        .nav-link.active { color:#e8533a; background:rgba(232,83,58,0.12); border-left:2px solid #e8533a; }
+        #page-home, #page-signup, #page-nurturing, #page-category, #page-eventoccur, #page-registration, #page-newsletter { display:none; flex:1; flex-direction:column; overflow-y:auto; }
+        #page-home.visible, #page-signup.visible, #page-nurturing.visible, #page-category.visible, #page-eventoccur.visible, #page-registration.visible, #page-newsletter.visible { display:flex; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+<!-- ===== SIDEBAR ===== -->
+<div class="sidebar w-72 flex flex-col border-r border-gray-800 shrink-0" style="height:100vh;">
+    <!-- Logo -->
+    <div class="flex items-center gap-3 p-6 pb-4 shrink-0">
+        <div class="bg-red-500 p-2.5 rounded-xl text-white text-xl">
+            <i class="fa-solid fa-utensils"></i>
+        </div>
+        <div>
+            <h2 class="font-bold text-lg leading-tight cursor-pointer hover:text-[#e8533a] transition" onclick="showHome()">Restaurant Association</h2>
+            <p class="text-xs text-gray-400">Email Analytics Dashboard</p>
+        </div>
+    </div>
+
+    <!-- Scrollable nav -->
+    <nav class="flex-1 overflow-y-auto style-scrollbar px-6 space-y-1">
+        <p class="text-xs font-semibold text-gray-500 tracking-wider uppercase mb-2 mt-1">Main</p>
+        <a onclick="showSignUp()" id="nav-signup" class="nav-link">
+            <i class="fa-solid fa-fire text-[#e8533a]"></i> Sign Up
+        </a>
+
+        <!-- Email By Category with sub-menu -->
+        <div>
+            <a onclick="toggleSidebarSection('emailcat')" id="nav-emailcat" class="nav-link" style="cursor:pointer;">
+                <span class="flex items-center gap-3"><i class="fa-solid fa-folder text-amber-500"></i> Email By Category</span>
+                <i id="chevron-emailcat" class="fa-solid fa-chevron-right text-xs text-gray-500 ml-auto" style="transition:transform 0.2s;"></i>
+            </a>
+            <div id="sub-emailcat" style="display:none; padding-left:16px; margin-top:4px; margin-bottom:4px;">
+                <div class="space-y-1" style="border-left: 2px solid rgba(245,158,11,0.3); padding-left:12px;">
+                    <a onclick="showCategory('Sign Up')"     id="nav-cat-signup"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Sign Up</a>
+                    <a onclick="showCategory('News')"        id="nav-cat-news"       class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> News</a>
+                    <a onclick="showCategory('Chomp Show')"  id="nav-cat-chomp"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Chomp Show</a>
+                    <a onclick="showCategory('Academy')"     id="nav-cat-academy"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Academy</a>
+                    <a onclick="showCategory('Jobs')"        id="nav-cat-jobs"       class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Jobs</a>
+                    <a onclick="showCategory('Resources')"   id="nav-cat-resources"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Resources</a>
+                    <a onclick="showCategory('Contact Us')"  id="nav-cat-contactus"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Contact Us</a>
+                    <a onclick="showCategory('Benefits')"    id="nav-cat-benefits"   class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Benefits</a>
+                </div>
+            </div>
+        </div>
+
+        <a onclick="showNurturing()" id="nav-nurturing" class="nav-link">
+            <i class="fa-solid fa-droplet text-blue-400"></i> Email Nurturing
+        </a>
+
+        <!-- Event Occur -->
+        <div>
+            <a onclick="toggleSidebarSection('eventoccur')" id="nav-eventoccur" class="nav-link" style="cursor:pointer;">
+                <span class="flex items-center gap-3"><i class="fa-solid fa-bullseye text-pink-500"></i> Event Occur</span>
+                <i id="chevron-eventoccur" class="fa-solid fa-chevron-right text-xs text-gray-500 ml-auto" style="transition:transform 0.2s;"></i>
+            </a>
+            <div id="sub-eventoccur" style="display:none; padding-left:16px; margin-top:4px; margin-bottom:4px;">
+                <div class="space-y-1" style="border-left: 2px solid rgba(236,72,153,0.3); padding-left:12px;">
+                    <a onclick="showEventOccur('Sign Up','Sign_Up','pink')"       id="nav-eo-signup"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Sign Up <span class="ml-auto text-[9px] text-pink-400/60 font-mono">Sign_Up</span></a>
+                    <a onclick="showEventOccur('News','interest_news','blue')"    id="nav-eo-news"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> News <span class="ml-auto text-[9px] text-blue-400/60 font-mono">interest_news</span></a>
+                    <a onclick="showEventOccur('Blog','interest_topics','amber')" id="nav-eo-blog"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Blog <span class="ml-auto text-[9px] text-amber-400/60 font-mono">interest_topics</span></a>
+                    <a onclick="showEventOccur('Chomp Show','interest_chomp_show','indigo')" id="nav-eo-chomp" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Chomp Show <span class="ml-auto text-[9px] text-indigo-400/60 font-mono">interest_chomp</span></a>
+                    <a onclick="showEventOccur('Academy','interest_training','orange')" id="nav-eo-academy" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Academy <span class="ml-auto text-[9px] text-orange-400/60 font-mono">interest_training</span></a>
+                    <a onclick="showEventOccur('Jobs','interest_jobs','emerald')" id="nav-eo-jobs"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Jobs <span class="ml-auto text-[9px] text-emerald-400/60 font-mono">interest_jobs</span></a>
+                    <a onclick="showEventOccur('Contact Us','intent_contact','purple')" id="nav-eo-contact" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Contact Us <span class="ml-auto text-[9px] text-purple-400/60 font-mono">intent_contact</span></a>
+                    <a onclick="showEventOccur('Benefits','req_benefits','teal')" id="nav-eo-benefits"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-pink-500/60"></i> Benefits <span class="ml-auto text-[9px] text-teal-400/60 font-mono">req_benefits</span></a>
+                </div>
+            </div>
+        </div>
+
+        <a onclick="showNewsletter()" id="nav-newsletter" class="nav-link" style="cursor:pointer;">
+            <i class="fa-solid fa-newspaper text-gray-400"></i> Newsletter
+        </a>
+
+        <!-- Registration -->
+        <div>
+            <a onclick="toggleSidebarSection('registration')" id="nav-registration" class="nav-link" style="cursor:pointer;">
+                <span class="flex items-center gap-3"><i class="fa-solid fa-clipboard-list text-amber-600"></i> Registration</span>
+                <i id="chevron-registration" class="fa-solid fa-chevron-right text-xs text-gray-500 ml-auto" style="transition:transform 0.2s;"></i>
+            </a>
+            <div id="sub-registration" style="display:none; padding-left:16px; margin-top:4px; margin-bottom:4px;">
+                <div class="space-y-1" style="border-left: 2px solid rgba(217,119,6,0.3); padding-left:12px;">
+                    <a onclick="showRegistration('Sign Up')"    id="nav-reg-signup"   class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Sign Up</a>
+                    <a onclick="showRegistration('Contact Us')" id="nav-reg-contact"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Contact Us</a>
+                    <a onclick="showRegistration('Chomp Show')" id="nav-reg-chomp"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Chomp Show</a>
+                    <a onclick="showRegistration('Benefits')"   id="nav-reg-benefits" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Benefits</a>
+                    <a onclick="showRegistration('Jobs')"       id="nav-reg-jobs"     class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Jobs</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Auto-refresh status - fixed at bottom, always visible -->
+    <div class="p-6 pt-4 shrink-0 border-t border-gray-800">
+        <button onclick="loadAllData()" class="w-full text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm cursor-pointer hover:opacity-90" style="background:#e8533a;">
+            <i class="fa-solid fa-rotate"></i> Refresh Now
+        </button>
+        <p class="text-[10px] text-center text-gray-500 mt-2" id="lastRefreshTime">Loading...</p>
+        <p class="text-[9px] text-center text-gray-600 mt-0.5">Auto-refreshes every 2 hours</p>
+    </div>
+</div>
+
+<!-- ===== HOME PAGE (default - original template content) ===== -->
+<div id="page-home" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <div class="flex items-center gap-2 mb-4">
+        <i class="fa-solid fa-fire text-[#e8533a] text-xl"></i>
+        <h1 class="text-xl font-bold">Sign Up</h1>
+    </div>
+
+    <div class="grid grid-cols-7 gap-3 mb-8">
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-blue-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
+            <p class="text-xl font-bold mt-1 text-blue-400">198</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Total delivered</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-emerald-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Opens</p>
+            <p class="text-xl font-bold mt-1 text-emerald-400">107</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Unique reads</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-purple-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Clicks</p>
+            <p class="text-xl font-bold mt-1 text-purple-400">8</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Unique clicks</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-red-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
+            <p class="text-xl font-bold mt-1 text-red-400">91</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Not opened count</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-gray-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
+            <p class="text-xl font-bold mt-1 text-gray-300">0</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-amber-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
+            <p class="text-xl font-bold mt-1 text-amber-400">54.0%</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Read ratio avg</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-pink-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Click Rate</p>
+            <p class="text-xl font-bold mt-1 text-pink-400">4.0%</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Click ratio avg</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-6 mb-8">
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
+                <span class="flex items-center gap-2"><i class="fa-solid fa-folder text-amber-500 text-sm"></i><h3 class="text-sm font-semibold">Email By Category</h3></span>
+                <span class="text-[10px] text-gray-500 uppercase">All recipients</span>
+            </div>
+            <table class="w-full text-xs text-left">
+                <thead><tr class="text-blue-400 border-b border-gray-800">
+                    <th class="pb-2 font-semibold">Category</th>
+                    <th class="pb-2 font-semibold text-center">Sent Count</th>
+                    <th class="pb-2 font-semibold text-center">Read Count</th>
+                    <th class="pb-2 font-semibold text-center">Click Count</th>
+                    <th class="pb-2 font-semibold text-center">Not Opened</th>
+                </tr></thead>
+                <tbody class="divide-y divide-gray-800/30" id="home-cat-table">
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Sign Up</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">News</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Chomp Show</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Academy</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Jobs</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Resources</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Contact Us</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">Benefits</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-bg p-5 rounded-xl flex flex-col">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
+                <span class="flex items-center gap-2"><i class="fa-solid fa-bullseye text-pink-500 text-sm"></i><h3 class="text-sm font-semibold">Event Occur (Tag Tracking)</h3></span>
+                <span class="text-[10px] text-gray-400 font-medium tracking-wider bg-gray-800/60 px-2 py-0.5 rounded uppercase">All Recipients</span>
+            </div>
+            <div class="space-y-2 max-h-[220px] overflow-y-auto pr-1 style-scrollbar flex-1">
+                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">Sign Up</span>
+                        <span class="text-[9px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-2 py-0.5 rounded-full font-mono">Sign_Up</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">1,240</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">892 Users</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-pink-500 h-full rounded-full" style="width:75%"></div></div>
+                </div>
+                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">News</span>
+                        <span class="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full font-mono">interest_news</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">620</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">415 Users</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-blue-500 h-full rounded-full" style="width:45%"></div></div>
+                </div>
+                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">Blog</span>
+                        <span class="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-mono">interest_topics</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">840</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">510 Users</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-amber-500 h-full rounded-full" style="width:60%"></div></div>
+                </div>
+                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">Chomp Video</span>
+                        <span class="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full font-mono">interest_video</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">310</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">198 Users</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-purple-500 h-full rounded-full" style="width:30%"></div></div>
+                </div>
+                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">Chomp Show</span>
+                        <span class="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-mono">interest_chomp_show</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">450</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">280 Users</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-indigo-500 h-full rounded-full" style="width:40%"></div></div>
+                </div>
+                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">Academy</span>
+                        <span class="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full font-mono">interest_training</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">540</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">390 Users</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-orange-500 h-full rounded-full" style="width:50%"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
+                <span class="flex items-center gap-2"><i class="fa-solid fa-newspaper text-gray-400 text-sm"></i><h3 class="text-sm font-semibold">Newsletter</h3></span>
+                <span class="text-[10px] text-gray-500 uppercase">All recipients</span>
+            </div>
+            <table class="w-full text-xs text-left">
+                <thead><tr class="text-blue-400 border-b border-gray-800">
+                    <th class="pb-2 font-semibold">Newsletter Campaign</th>
+                    <th class="pb-2 font-semibold text-center">Sent Count</th>
+                    <th class="pb-2 font-semibold text-center">Read Count</th>
+                    <th class="pb-2 font-semibold text-center">Click Count</th>
+                </tr></thead>
+                <tbody class="divide-y divide-gray-800/30" id="home-nl-table">
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-1</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-2</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-3</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-4</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-5</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-6</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-7</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                    <tr class="orange-text"><td class="py-1.5 font-medium">RA News Letter Week-8</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
+                <span class="flex items-center gap-2"><i class="fa-solid fa-clipboard-list text-amber-500 text-sm"></i><h3 class="text-sm font-semibold">Registration / Web-Form Pipeline</h3></span>
+                <span class="text-[9px] text-emerald-400 font-bold bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900/40 uppercase">Automation Active</span>
+            </div>
+            <table class="w-full text-xs text-left">
+                <thead><tr class="text-blue-400 border-b border-gray-800">
+                    <th class="pb-2 font-semibold">Form Title</th>
+                    <th class="pb-2 font-semibold text-center">Submissions</th>
+                    <th class="pb-2 font-semibold text-center">Assigned Mautic Tag</th>
+                    <th class="pb-2 font-semibold text-center">Email Sent Status</th>
+                </tr></thead>
+                <tbody class="divide-y divide-gray-800/30" id="home-reg-table">
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Sign Up</td><td class="text-center text-white font-semibold">1,240</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">Sign_Up</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 99.1% Success</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Contact Us</td><td class="text-center text-white font-semibold">320</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">intent_contact</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 100% Sent</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Chomp Show</td><td class="text-center text-white font-semibold">450</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">interest_chomp_show</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 98.4% Sent</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Benefits</td><td class="text-center text-white font-semibold">510</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">requested_chomp_show</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 99.5% Sent</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Jobs</td><td class="text-center text-white font-semibold">390</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">interest_jobs</span></td><td class="text-center text-amber-400 font-medium"><i class="fa-solid fa-spinner animate-spin mr-1"></i> 91.2% Processing</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card-bg p-6 rounded-xl">
+        <div class="flex items-center gap-2 mb-4 border-b border-gray-800 pb-2">
+            <i class="fa-solid fa-droplet text-blue-400 text-sm"></i>
+            <h3 class="text-sm font-semibold">Email Nurturing</h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left whitespace-nowrap">
+                <thead><tr class="text-blue-400 border-b border-gray-800 text-sm">
+                    <th class="pb-3 font-semibold text-left">Email Campaign Name</th>
+                    <th class="pb-3 font-semibold text-center">Sent Count</th>
+                    <th class="pb-3 font-semibold text-center">Read Count</th>
+                    <th class="pb-3 font-semibold text-center">Read Ratio%</th>
+                    <th class="pb-3 font-semibold text-center">Click Count</th>
+                    <th class="pb-3 font-semibold text-center">Click Ratio%</th>
+                    <th class="pb-3 font-semibold text-center">Not Open</th>
+                    <th class="pb-3 font-semibold text-center">Not Open %</th>
+                </tr></thead>
+                <tbody class="divide-y divide-gray-800/40 text-center">
+                    <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 001</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+                    <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 002</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+                    <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 003</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+                    <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 004</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ===== SIGN UP DETAIL PAGE ===== -->
+<div id="page-signup" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-5">
+        <i class="fa-solid fa-fire text-[#e8533a] text-xl"></i>
+        <h1 class="text-xl font-bold">Sign Up</h1>
+        <span class="text-[10px] text-gray-400 bg-gray-800/70 px-3 py-1 rounded-full" id="su-subject">—</span>
+        <span class="ml-auto text-[11px] text-gray-500" id="su-date">—</span>
+    </div>
+
+    <!-- KPI Cards — 8 cards including Bounced -->
+    <div class="grid grid-cols-4 gap-3 mb-4">
+        <!-- Row 1 -->
+        <div class="card-bg p-4 rounded-xl border-t-4" style="border-color:#e8533a;">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
+                    <p class="text-2xl font-bold mt-1" style="color:#e8533a;" id="su-sent">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Total delivered</p>
+                </div>
+                <i class="fa-solid fa-envelope text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-blue-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unique Opens</p>
+                    <p class="text-2xl font-bold mt-1 text-blue-400" id="su-opened">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="su-openrate-sub">Open rate: —</p>
+                </div>
+                <i class="fa-regular fa-eye text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-emerald-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unique Clicks</p>
+                    <p class="text-2xl font-bold mt-1 text-emerald-400" id="su-clicked">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="su-clickrate-sub">Click rate: —</p>
+                </div>
+                <i class="fa-regular fa-hand-pointer text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Click-to-Open</p>
+                    <p class="text-2xl font-bold mt-1 text-amber-400" id="su-cto">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Of openers who clicked</p>
+                </div>
+                <i class="fa-solid fa-chart-bar text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+    <div class="grid grid-cols-4 gap-3 mb-5">
+        <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Organisations</p>
+                    <p class="text-2xl font-bold mt-1 text-purple-400" id="su-orgs">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Unique email domains</p>
+                </div>
+                <i class="fa-solid fa-building text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
+                    <p class="text-2xl font-bold mt-1 text-red-400" id="su-notopen">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="su-notopen-sub">— of sent</p>
+                </div>
+                <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
+                    <p class="text-2xl font-bold mt-1 text-gray-300" id="su-bounced">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="su-bounced-sub">— bounce rate</p>
+                </div>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
+                    <p class="text-2xl font-bold mt-1 text-pink-400" id="su-openrate">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Read ratio avg</p>
+                </div>
+                <i class="fa-solid fa-percent text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Email Funnel + Sends by Hour -->
+    <div class="grid grid-cols-2 gap-4 mb-4">
+
+        <!-- Email Funnel -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Email Funnel</h3>
+                <span class="text-[10px] text-gray-500 truncate max-w-[200px]" id="su-funnel-subject">—</span>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <div class="flex items-center gap-3 mb-1">
+                        <div class="h-8 rounded flex items-center px-3 bg-blue-500 font-bold text-sm" id="su-funnel-sent-bar" style="width:100%">—</div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Delivered</span><span>100%</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center gap-3 mb-1">
+                        <div class="h-8 rounded flex items-center px-3 bg-emerald-500 font-bold text-sm" id="su-funnel-open-bar" style="width:0%">—</div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Opened</span><span id="su-funnel-open-pct">—</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center gap-3 mb-1">
+                        <div class="h-8 rounded flex items-center px-3 font-bold text-sm text-white" id="su-funnel-click-bar" style="width:0%; min-width:44px; background:#e8533a;">—</div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Clicked</span><span id="su-funnel-click-pct">—</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Engagement Breakdown (replaced Sends by Hour) -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Engagement Breakdown</h3>
+                <span class="text-[10px] text-gray-500">All recipients</span>
+            </div>
+            <div class="flex items-center gap-8" style="padding-top:10px;">
+                <canvas id="donutChart2" width="150" height="150" style="flex-shrink:0;"></canvas>
+                <div class="space-y-5 flex-1">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span><span class="text-sm text-gray-300">Clicked</span></div>
+                        <span class="text-sm font-bold text-white" id="su-eng-clicked">—</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-blue-400 inline-block"></span><span class="text-sm text-gray-300">Opened, not clicked</span></div>
+                        <span class="text-sm font-bold text-white" id="su-eng-openedonly">—</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-gray-600 inline-block"></span><span class="text-sm text-gray-300">Not opened</span></div>
+                        <span class="text-sm font-bold text-white" id="su-eng-notopened">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 3: Recipient Activity + Top Organisations -->
+    <div class="grid gap-4 mb-4" style="grid-template-columns:3fr 2fr;">
+
+        <!-- Recipient Activity -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
+                <span class="text-[10px] text-gray-500" id="su-contact-count">— contacts</span>
+            </div>
+            <div class="mb-3 flex gap-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                    <input id="searchInput" type="text" placeholder="Search email..." oninput="filterRecipients()"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+                </div>
+                <select id="filterSel" onchange="filterRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                    <option value="all">All</option>
+                    <option value="opened">Opened</option>
+                    <option value="not_opened">Not Opened</option>
+                    <option value="clicked">Clicked</option>
+                </select>
+            </div>
+            <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="sticky top-0 bg-[#1a1d26]">
+                        <tr class="text-blue-400 border-b border-gray-800">
+                            <th class="pb-2 font-semibold">EMAIL</th>
+                            <th class="pb-2 font-semibold text-center">SENT</th>
+                            <th class="pb-2 font-semibold text-center">READ</th>
+                            <th class="pb-2 font-semibold text-center">CLICKED</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recipientBody" class="divide-y divide-gray-800/30"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+                <span id="pageInfo" class="text-[10px] text-gray-500"></span>
+                <div class="flex gap-1">
+                    <button onclick="prevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button onclick="nextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Organisations -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Top Organisations</h3>
+                <span class="text-[10px] text-gray-500">By email count</span>
+            </div>
+            <div id="orgList" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:340px;"></div>
+        </div>
+    </div>
+
+
+
+</div><!-- end page-signup -->
+
+<!-- ===== EMAIL NURTURING PAGE ===== -->
+<div id="page-nurturing" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-5">
+        <button onclick="showHome()" class="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+        </button>
+        <i class="fa-solid fa-droplet text-blue-400 text-xl"></i>
+        <h1 class="text-xl font-bold">Email Nurturing</h1>
+        <span class="text-[11px] text-blue-400 bg-blue-900/30 border border-blue-800/40 px-3 py-1 rounded-full font-semibold">14 Emails</span>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-4 gap-3 mb-4">
+        <div class="card-bg p-4 rounded-xl border-t-4" style="border-color:#e8533a;">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Sent</p>
+                    <p class="text-2xl font-bold mt-1" style="color:#e8533a;">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Emails sent</p>
+                </div>
+                <i class="fa-solid fa-envelope text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-blue-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Opens</p>
+                    <p class="text-2xl font-bold mt-1 text-blue-400">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Unique reads</p>
+                </div>
+                <i class="fa-regular fa-eye text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-emerald-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Clicks</p>
+                    <p class="text-2xl font-bold mt-1 text-emerald-400">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Unique clicks</p>
+                </div>
+                <i class="fa-regular fa-hand-pointer text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
+                    <p class="text-2xl font-bold mt-1 text-red-400">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Not opened count</p>
+                </div>
+                <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+    <div class="grid grid-cols-4 gap-3 mb-5">
+        <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
+                    <p class="text-2xl font-bold mt-1 text-amber-400">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Read ratio avg</p>
+                </div>
+                <i class="fa-solid fa-percent text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Click Rate</p>
+                    <p class="text-2xl font-bold mt-1 text-purple-400">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Click ratio avg</p>
+                </div>
+                <i class="fa-solid fa-chart-bar text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
+                    <p class="text-2xl font-bold mt-1 text-gray-300">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
+                </div>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Organisations</p>
+                    <p class="text-2xl font-bold mt-1 text-pink-400">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Unique email domains</p>
+                </div>
+                <i class="fa-solid fa-building text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Email-wise Breakdown Heading -->
+    <p class="text-xs font-bold text-gray-400 tracking-widest uppercase mb-3">Email-wise Breakdown</p>
+
+    <!-- 14 Email Cards -->
+    <div class="space-y-3" id="nurturingEmails"></div>
+
+</div><!-- end page-nurturing -->
+
+<!-- ===== EMAIL BY CATEGORY DETAIL PAGE ===== -->
+<div id="page-category" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-5">
+        <button onclick="showHome()" class="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+        </button>
+        <i class="fa-solid fa-folder text-amber-500 text-xl"></i>
+        <h1 class="text-xl font-bold" id="cat-title">Category</h1>
+        <span class="text-[11px] text-amber-400 bg-amber-900/20 border border-amber-800/30 px-3 py-1 rounded-full font-semibold" id="cat-badge">Email By Category</span>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-4 gap-3 mb-4">
+        <div class="card-bg p-4 rounded-xl border-t-4" style="border-color:#e8533a;">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
+                    <p class="text-2xl font-bold mt-1" style="color:#e8533a;" id="cat-sent">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Total delivered</p>
+                </div>
+                <i class="fa-solid fa-envelope text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-blue-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unique Opens</p>
+                    <p class="text-2xl font-bold mt-1 text-blue-400" id="cat-opens">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="cat-open-rate">Open rate: —</p>
+                </div>
+                <i class="fa-regular fa-eye text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-emerald-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unique Clicks</p>
+                    <p class="text-2xl font-bold mt-1 text-emerald-400" id="cat-clicks">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="cat-click-rate">Click rate: —</p>
+                </div>
+                <i class="fa-regular fa-hand-pointer text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
+                    <p class="text-2xl font-bold mt-1 text-red-400" id="cat-notopen">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="cat-notopen-pct">— of sent</p>
+                </div>
+                <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+    <div class="grid grid-cols-4 gap-3 mb-5">
+        <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Click-to-Open</p>
+                    <p class="text-2xl font-bold mt-1 text-amber-400" id="cat-cto">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Of openers who clicked</p>
+                </div>
+                <i class="fa-solid fa-chart-bar text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Organisations</p>
+                    <p class="text-2xl font-bold mt-1 text-purple-400" id="cat-orgs">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Unique email domains</p>
+                </div>
+                <i class="fa-solid fa-building text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
+                    <p class="text-2xl font-bold mt-1 text-gray-300">0</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">0.0% bounce rate</p>
+                </div>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
+                    <p class="text-2xl font-bold mt-1 text-pink-400" id="cat-avg-open">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Read ratio avg</p>
+                </div>
+                <i class="fa-solid fa-percent text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Funnel + Engagement side by side -->
+    <div class="grid grid-cols-2 gap-4 mb-4">
+
+        <!-- Email Funnel -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Email Funnel</h3>
+                <span class="text-[10px] text-gray-500" id="cat-funnel-label">—</span>
+            </div>
+            <div class="space-y-4" id="cat-funnel">
+                <div>
+                    <div class="flex items-center mb-1">
+                        <div class="h-8 rounded flex items-center px-3 bg-blue-500 font-bold text-sm text-white w-full" id="cat-funnel-sent-bar">—</div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Delivered</span><span>100%</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center mb-1">
+                        <div class="h-8 rounded flex items-center px-3 bg-emerald-500 font-bold text-sm text-white" id="cat-funnel-open-bar" style="min-width:44px;">—</div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Opened</span><span id="cat-funnel-open-pct">—</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center mb-1">
+                        <div class="h-8 rounded flex items-center px-3 font-bold text-sm text-white" id="cat-funnel-click-bar" style="min-width:44px; background:#e8533a;">—</div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Clicked</span><span id="cat-funnel-click-pct">—</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Engagement Breakdown -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Engagement Breakdown</h3>
+                <span class="text-[10px] text-gray-500">All recipients</span>
+            </div>
+            <div class="flex items-center gap-8" style="padding-top:8px;">
+                <canvas id="catDonut" width="140" height="140" style="flex-shrink:0;"></canvas>
+                <div class="space-y-4 flex-1">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span><span class="text-sm text-gray-300">Clicked</span></div>
+                        <span class="text-sm font-bold text-white" id="cat-eg-clicked">—</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-blue-400 inline-block"></span><span class="text-sm text-gray-300">Opened, not clicked</span></div>
+                        <span class="text-sm font-bold text-white" id="cat-eg-opened">—</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-gray-600 inline-block"></span><span class="text-sm text-gray-300">Not opened</span></div>
+                        <span class="text-sm font-bold text-white" id="cat-eg-notopened">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipient Activity -->
+    <div class="card-bg p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+            <h3 class="text-sm font-semibold">Recipient Activity</h3>
+            <span class="text-[10px] text-gray-500" id="cat-recipient-count">— contacts</span>
+        </div>
+        <div class="mb-3 flex gap-2">
+            <div class="relative flex-1">
+                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                <input id="catSearchInput" type="text" placeholder="Search email..." oninput="filterCatRecipients()"
+                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+            </div>
+            <select id="catFilterSel" onchange="filterCatRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                <option value="all">All</option>
+                <option value="opened">Opened</option>
+                <option value="not_opened">Not Opened</option>
+                <option value="clicked">Clicked</option>
+            </select>
+        </div>
+        <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
+            <table class="w-full text-[11px] text-left">
+                <thead class="sticky top-0 bg-[#1a1d26]">
+                    <tr class="text-blue-400 border-b border-gray-800">
+                        <th class="pb-2 font-semibold">EMAIL</th>
+                        <th class="pb-2 font-semibold text-center">SENT</th>
+                        <th class="pb-2 font-semibold text-center">READ</th>
+                        <th class="pb-2 font-semibold text-center">CLICKED</th>
+                    </tr>
+                </thead>
+                <tbody id="catRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+            </table>
+        </div>
+        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+            <span id="catPageInfo" class="text-[10px] text-gray-500"></span>
+            <div class="flex gap-1">
+                <button onclick="catPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                <button onclick="catNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- end page-category -->
+
+<!-- ===== EVENT OCCUR DETAIL PAGE ===== -->
+<div id="page-eventoccur" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-5">
+        <button onclick="showHome()" class="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+        </button>
+        <i class="fa-solid fa-bullseye text-pink-500 text-xl"></i>
+        <h1 class="text-xl font-bold" id="eo-title">Event Occur</h1>
+        <span class="font-mono text-[11px] text-pink-400 bg-pink-900/20 border border-pink-800/30 px-3 py-1 rounded-full font-semibold" id="eo-tag-badge">—</span>
+    </div>
+
+    <!-- KPI Cards Row 1 -->
+    <div class="grid grid-cols-4 gap-3 mb-3">
+        <div class="card-bg p-4 rounded-xl border-t-4" style="border-color:#e8533a;">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Page Visits / Hits</p>
+                <p class="text-2xl font-bold mt-1" style="color:#e8533a;" id="eo-hits">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Tag trigger count</p></div>
+                <i class="fa-solid fa-bolt text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-blue-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Tags Assigned</p>
+                <p class="text-2xl font-bold mt-1 text-blue-400" id="eo-tagged">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Unique users tagged</p></div>
+                <i class="fa-solid fa-tag text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-emerald-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Triggered</p>
+                <p class="text-2xl font-bold mt-1 text-emerald-400" id="eo-triggered">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Automation sent</p></div>
+                <i class="fa-solid fa-paper-plane text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
+                <p class="text-2xl font-bold mt-1 text-gray-300">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">0.0% bounce rate</p></div>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI Cards Row 2 -->
+    <div class="grid grid-cols-4 gap-3 mb-5">
+        <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Opened</p>
+                <p class="text-2xl font-bold mt-1 text-amber-400" id="eo-opened">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5" id="eo-open-rate">Open rate: —</p></div>
+                <i class="fa-regular fa-eye text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Clicked</p>
+                <p class="text-2xl font-bold mt-1 text-purple-400" id="eo-clicked">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5" id="eo-click-rate">Click rate: —</p></div>
+                <i class="fa-regular fa-hand-pointer text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
+                <p class="text-2xl font-bold mt-1 text-red-400" id="eo-notopen">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5" id="eo-notopen-pct">—% of sent</p></div>
+                <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Click-to-Open</p>
+                <p class="text-2xl font-bold mt-1 text-pink-400" id="eo-cto">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Of openers who clicked</p></div>
+                <i class="fa-solid fa-arrow-trend-up text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tag Info + Funnel side by side -->
+    <div class="grid grid-cols-2 gap-4 mb-4">
+        <!-- Tag Info -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2"><i class="fa-solid fa-tag text-pink-400 text-xs"></i> Tag Info</h3>
+                <span class="text-[9px] text-emerald-400 bg-emerald-900/20 px-2 py-0.5 rounded-full border border-emerald-800/30 font-semibold uppercase">Active</span>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <p class="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Tag Name</p>
+                    <span class="font-mono text-sm font-bold text-pink-400 bg-pink-900/20 px-3 py-1.5 rounded-lg border border-pink-800/30" id="eo-tagname">—</span>
+                </div>
+                <div>
+                    <p class="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Trigger Event</p>
+                    <p class="text-sm text-gray-200" id="eo-trigger-event">—</p>
+                </div>
+                <div class="pt-2 border-t border-gray-800">
+                    <p class="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Flow</p>
+                    <div class="flex items-center gap-2 text-xs text-gray-300 flex-wrap">
+                        <span class="bg-gray-800 px-2 py-1 rounded">User visits page</span>
+                        <i class="fa-solid fa-arrow-right text-[10px] text-gray-600"></i>
+                        <span class="bg-pink-900/30 border border-pink-800/30 text-pink-400 px-2 py-1 rounded font-mono" id="eo-flow-tag">—</span>
+                        <i class="fa-solid fa-arrow-right text-[10px] text-gray-600"></i>
+                        <span class="bg-emerald-900/30 border border-emerald-800/30 text-emerald-400 px-2 py-1 rounded">Email sent</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Funnel -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2"><i class="fa-solid fa-filter text-pink-400 text-xs"></i> Funnel</h3>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-300 mb-1.5"><span>Page Visits</span><span id="eo-f-hits">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-pink-500 h-2 rounded-full" style="width:100%;"></div></div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-300 mb-1.5"><span>Tag Assigned</span><span id="eo-f-tagged">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-blue-500 h-2 rounded-full" id="eo-f-tagged-bar" style="width:80%;"></div></div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-300 mb-1.5"><span>Email Sent</span><span id="eo-f-triggered">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-emerald-500 h-2 rounded-full" id="eo-f-triggered-bar" style="width:70%;"></div></div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-300 mb-1.5"><span>Email Opened</span><span id="eo-f-opened">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-amber-500 h-2 rounded-full" id="eo-f-opened-bar" style="width:50%;"></div></div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-300 mb-1.5"><span>Email Clicked</span><span id="eo-f-clicked">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-2"><div class="h-2 rounded-full" id="eo-f-clicked-bar" style="width:20%;background:#e8533a;"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipient Activity -->
+    <div class="card-bg p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+            <h3 class="text-sm font-semibold">Recipient Activity</h3>
+            <span class="text-[10px] text-gray-500" id="eo-rec-count">— contacts</span>
+        </div>
+        <div class="mb-3 flex gap-2">
+            <div class="relative flex-1">
+                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                <input id="eoSearchInput" type="text" placeholder="Search email..." oninput="filterEORecipients()"
+                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+            </div>
+            <select id="eoFilterSel" onchange="filterEORecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                <option value="all">All</option>
+                <option value="opened">Opened</option>
+                <option value="not_opened">Not Opened</option>
+                <option value="clicked">Clicked</option>
+            </select>
+        </div>
+        <div class="overflow-y-auto style-scrollbar" style="max-height:260px;">
+            <table class="w-full text-[11px] text-left">
+                <thead class="sticky top-0 bg-[#1a1d26]">
+                    <tr class="text-blue-400 border-b border-gray-800">
+                        <th class="pb-2 font-semibold">EMAIL</th>
+                        <th class="pb-2 font-semibold text-center">SENT</th>
+                        <th class="pb-2 font-semibold text-center">READ</th>
+                        <th class="pb-2 font-semibold text-center">CLICKED</th>
+                    </tr>
+                </thead>
+                <tbody id="eoRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+            </table>
+        </div>
+        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+            <span id="eoPageInfo" class="text-[10px] text-gray-500"></span>
+            <div class="flex gap-1">
+                <button onclick="eoPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                <button onclick="eoNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- end page-eventoccur -->
+
+<!-- ===== REGISTRATION DETAIL PAGE ===== -->
+<div id="page-registration" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-5">
+        <button onclick="showHome()" class="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+        </button>
+        <i class="fa-solid fa-clipboard-list text-amber-500 text-xl"></i>
+        <h1 class="text-xl font-bold" id="reg-title">Registration</h1>
+        <span class="text-[11px] text-amber-400 bg-amber-900/20 border border-amber-800/30 px-3 py-1 rounded-full font-semibold" id="reg-badge">—</span>
+    </div>
+
+    <!-- KPI Cards Row 1 -->
+    <div class="grid grid-cols-4 gap-3 mb-3">
+        <div class="card-bg p-4 rounded-xl border-t-4" style="border-color:#e8533a;">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Form Submissions</p>
+                <p class="text-2xl font-bold mt-1" style="color:#e8533a;" id="reg-submissions">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Total filled</p></div>
+                <i class="fa-solid fa-clipboard-check text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-blue-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Tags Assigned</p>
+                <p class="text-2xl font-bold mt-1 text-blue-400" id="reg-tags-count">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Unique contacts tagged</p></div>
+                <i class="fa-solid fa-tags text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-emerald-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
+                <p class="text-2xl font-bold mt-1 text-emerald-400" id="reg-email-sent">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Auto-triggered</p></div>
+                <i class="fa-solid fa-paper-plane text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
+                <p class="text-2xl font-bold mt-1 text-gray-300">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">0.0% bounce rate</p></div>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI Cards Row 2 -->
+    <div class="grid grid-cols-4 gap-3 mb-5">
+        <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Opened</p>
+                <p class="text-2xl font-bold mt-1 text-amber-400" id="reg-opened">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5" id="reg-open-rate">Open rate: —</p></div>
+                <i class="fa-regular fa-eye text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Clicked</p>
+                <p class="text-2xl font-bold mt-1 text-purple-400" id="reg-clicked">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5" id="reg-click-rate">Click rate: —</p></div>
+                <i class="fa-regular fa-hand-pointer text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
+                <p class="text-2xl font-bold mt-1 text-red-400" id="reg-notopen">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5" id="reg-notopen-pct">—% of sent</p></div>
+                <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Click-to-Open</p>
+                <p class="text-2xl font-bold mt-1 text-pink-400" id="reg-cto">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Of openers who clicked</p></div>
+                <i class="fa-solid fa-arrow-trend-up text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tag Info + Funnel side by side -->
+    <div class="grid grid-cols-2 gap-4 mb-4">
+        <!-- Assigned Tags -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2"><i class="fa-solid fa-tags text-amber-400 text-xs"></i> Assigned Tags</h3>
+                <span class="text-[9px] text-emerald-400 bg-emerald-900/20 px-2 py-0.5 rounded-full border border-emerald-800/30 font-semibold uppercase">Active</span>
+            </div>
+            <div id="reg-tag-cards" class="space-y-3"></div>
+        </div>
+
+        <!-- Email Funnel -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2"><i class="fa-solid fa-filter text-amber-400 text-xs"></i> Email Funnel</h3>
+                <span class="text-[10px] text-gray-500" id="reg-funnel-label">—</span>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <div class="flex items-center mb-1"><div class="h-8 rounded flex items-center px-3 bg-blue-500 font-bold text-sm text-white w-full" id="reg-f-sent-bar">—</div></div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Delivered</span><span>100%</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center mb-1"><div class="h-8 rounded flex items-center px-3 bg-emerald-500 font-bold text-sm text-white" id="reg-f-open-bar" style="min-width:44px;">—</div></div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Opened</span><span id="reg-f-open-pct">—</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center mb-1"><div class="h-8 rounded flex items-center px-3 font-bold text-sm text-white" id="reg-f-click-bar" style="min-width:44px;background:#e8533a;">—</div></div>
+                    <div class="flex justify-between text-[10px] text-gray-400 px-1"><span>Clicked</span><span id="reg-f-click-pct">—</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipient Activity -->
+    <div class="card-bg p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+            <h3 class="text-sm font-semibold">Recipient Activity</h3>
+            <span class="text-[10px] text-gray-500" id="reg-rec-count">— contacts</span>
+        </div>
+        <div class="mb-3 flex gap-2">
+            <div class="relative flex-1">
+                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                <input id="regSearchInput" type="text" placeholder="Search email..." oninput="filterRegRecipients()"
+                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+            </div>
+            <select id="regFilterSel" onchange="filterRegRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                <option value="all">All</option>
+                <option value="opened">Opened</option>
+                <option value="not_opened">Not Opened</option>
+                <option value="clicked">Clicked</option>
+            </select>
+        </div>
+        <div class="overflow-y-auto style-scrollbar" style="max-height:260px;">
+            <table class="w-full text-[11px] text-left">
+                <thead class="sticky top-0 bg-[#1a1d26]">
+                    <tr class="text-blue-400 border-b border-gray-800">
+                        <th class="pb-2 font-semibold">EMAIL</th>
+                        <th class="pb-2 font-semibold text-center">SENT</th>
+                        <th class="pb-2 font-semibold text-center">READ</th>
+                        <th class="pb-2 font-semibold text-center">CLICKED</th>
+                    </tr>
+                </thead>
+                <tbody id="regRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+            </table>
+        </div>
+        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+            <span id="regPageInfo" class="text-[10px] text-gray-500"></span>
+            <div class="flex gap-1">
+                <button onclick="regPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                <button onclick="regNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- end page-registration -->
+
+<script>
+// ===== PAGE SWITCHING =====
+const pages = ['page-home','page-signup','page-nurturing','page-category','page-eventoccur','page-registration','page-newsletter'];
+const navs  = ['nav-signup','nav-nurturing','nav-emailcat','nav-eventoccur','nav-registration','nav-newsletter'];
+
+function hideAll() {
+    pages.forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.classList.remove('visible');
+    });
+    navs.forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.classList.remove('active');
+    });
+}
+function showPage(pageId, navId) {
+    hideAll();
+    const pg = document.getElementById(pageId);
+    if(pg) {
+        pg.classList.add('visible');
+        pg.scrollTop = 0; // scroll to top on page switch
+    }
+    if(navId) {
+        const nv = document.getElementById(navId);
+        if(nv) nv.classList.add('active');
+    }
+}
+function showHome()     { showPage('page-home', null); renderHome(); }
+
+function renderHome() {
+    if (!dataLoaded) return;
+    // Category summary table
+    const catNames = Object.keys(categorySubjectMap);
+    const catTbody = document.getElementById('home-cat-table');
+    if (catTbody) {
+        catTbody.innerHTML = catNames.map(name => {
+            const rows = categoryRows(name);
+            const s = rowStats(rows);
+            return `<tr class="orange-text"><td class="py-1.5 font-medium">${name}</td><td class="text-center">${s.sent||'-'}</td><td class="text-center">${s.opened||'-'}</td><td class="text-center">${s.clicked||'-'}</td><td class="text-center text-red-400">${s.notOpen||'-'}</td></tr>`;
+        }).join('');
+    }
+    // Newsletter summary table (top 8 most recent campaigns)
+    rebuildNewsletterData();
+    const nlTbody = document.getElementById('home-nl-table');
+    if (nlTbody) {
+        const top8 = nlWeeks.slice(0, 8);
+        nlTbody.innerHTML = top8.length ? top8.map(w =>
+            `<tr class="orange-text"><td class="py-1.5 font-medium" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.label}</td><td class="text-center">${w.sent||'-'}</td><td class="text-center">${w.read||'-'}</td><td class="text-center">${w.clicked||'-'}</td></tr>`
+        ).join('') : '<tr><td colspan="4" class="py-3 text-center text-gray-600 text-xs">No newsletter data</td></tr>';
+    }
+    // Registration/form summary table
+    const regTbody = document.getElementById('home-reg-table');
+    if (regTbody && Object.keys(regData).length) {
+        regTbody.innerHTML = Object.keys(regData).map(name => {
+            const cfg = regData[name];
+            const formSubs = gForms.filter(r => (r['Name']||'').toLowerCase().includes(name.toLowerCase().split(' ')[0].toLowerCase()));
+            const submissions = formSubs.length || 0;
+            const tag = cfg.tags[0] ? cfg.tags[0].tag : '—';
+            return `<tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">${name}</td><td class="text-center text-white font-semibold">${submissions || '-'}</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">${tag}</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> Live</td></tr>`;
+        }).join('');
+    }
+}
+function showSignUp()   { showPage('page-signup','nav-signup');   setTimeout(()=>{renderSignupKPIs();drawDonut2();renderRecipients();renderOrgs();},50); }
+
+// Fills every KPI card, funnel bar, and engagement number on the Sign Up page from live csvData (tag_emails sheet)
+function renderSignupKPIs() {
+    const s = rowStats(csvData);
+    const openRate  = pct(s.opened, s.sent);
+    const clickRate = pct(s.clicked, s.sent);
+    const cto       = pct(s.clicked, s.opened);
+    const bounceRate = pct(s.bounced, s.sent);
+    const notOpenPct = pct(s.notOpen, s.sent);
+    const openedNotClicked = s.opened - s.clicked;
+
+    const subj = gTagEmails.find(r => {
+        const e = (r['Email address']||r['Contact Contact Primary Email']||'').toLowerCase();
+        return (categorySubjectMap['Sign Up']||[]).some(k => (r['Subject']||'').toLowerCase().includes(k));
+    });
+    const subjectLine = subj ? subj['Subject'] : '—';
+    const sentDate = subj ? (subj['Date sent']||'').split(' ')[0] : '—';
+
+    const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
+    set('su-subject', subjectLine);
+    set('su-date', sentDate);
+    set('su-sent', s.sent || 0);
+    set('su-opened', s.opened || 0);
+    set('su-openrate-sub', 'Open rate: ' + openRate);
+    set('su-clicked', s.clicked || 0);
+    set('su-clickrate-sub', 'Click rate: ' + clickRate);
+    set('su-cto', cto);
+    set('su-orgs', s.orgs || 0);
+    set('su-notopen', s.notOpen || 0);
+    set('su-notopen-sub', notOpenPct + ' of sent');
+    set('su-bounced', s.bounced || 0);
+    set('su-bounced-sub', bounceRate + ' bounce rate');
+    set('su-openrate', openRate);
+    set('su-contact-count', (s.sent||0) + ' contacts');
+
+    // Funnel
+    set('su-funnel-subject', subjectLine);
+    const fSent = document.getElementById('su-funnel-sent-bar');
+    if (fSent) { fSent.style.width='100%'; fSent.textContent = s.sent || 0; }
+    const fOpen = document.getElementById('su-funnel-open-bar');
+    if (fOpen) { fOpen.style.width = (s.sent ? (s.opened/s.sent*100) : 0) + '%'; fOpen.textContent = s.opened || 0; }
+    set('su-funnel-open-pct', openRate);
+    const fClick = document.getElementById('su-funnel-click-bar');
+    if (fClick) { fClick.style.width = (s.sent ? Math.max(s.clicked/s.sent*100, s.clicked?3:0) : 0) + '%'; fClick.textContent = s.clicked || 0; }
+    set('su-funnel-click-pct', clickRate);
+
+    // Engagement breakdown
+    set('su-eng-clicked', s.clicked || 0);
+    set('su-eng-openedonly', openedNotClicked || 0);
+    set('su-eng-notopened', s.notOpen || 0);
+}
+function showNurturing(){ showPage('page-nurturing','nav-nurturing'); renderNurturing(); }
+
+// ===== UNIFIED SIDEBAR ACCORDION (only one open at a time) =====
+const sidebarSections = ['emailcat', 'eventoccur', 'registration'];
+let openSidebarSection = null;
+
+function toggleSidebarSection(section) {
+    const isCurrentlyOpen = (openSidebarSection === section);
+    // Close all sections first
+    sidebarSections.forEach(s => {
+        const sub = document.getElementById('sub-' + s);
+        const chevron = document.getElementById('chevron-' + s);
+        const nav = document.getElementById('nav-' + s);
+        if(sub) sub.style.display = 'none';
+        if(chevron) chevron.style.transform = 'rotate(0deg)';
+        if(nav) nav.classList.remove('active');
+    });
+    // If it wasn't open, open it now (accordion behavior)
+    if(!isCurrentlyOpen) {
+        const sub = document.getElementById('sub-' + section);
+        const chevron = document.getElementById('chevron-' + section);
+        const nav = document.getElementById('nav-' + section);
+        if(sub) sub.style.display = 'block';
+        if(chevron) chevron.style.transform = 'rotate(90deg)';
+        if(nav) nav.classList.add('active');
+        openSidebarSection = section;
+    } else {
+        openSidebarSection = null;
+    }
+}
+
+// Category nav IDs map
+const catNavIds = {
+    'Sign Up':'nav-cat-signup','News':'nav-cat-news','Chomp Show':'nav-cat-chomp',
+    'Academy':'nav-cat-academy','Jobs':'nav-cat-jobs','Resources':'nav-cat-resources',
+    'Contact Us':'nav-cat-contactus','Benefits':'nav-cat-benefits'
+};
+let currentCategory = '';
+let catFiltered = [];
+let catPage = 1;
+const catPerPage = 12;
+
+function showCategory(catName) {
+    currentCategory = catName;
+    // clear sub-nav active states
+    Object.values(catNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
+    const navEl = document.getElementById(catNavIds[catName]);
+    if(navEl) navEl.classList.add('active');
+
+    showPage('page-category', null);
+    // keep emailcat parent highlighted
+    document.getElementById('nav-emailcat').classList.add('active');
+
+    // Real data for every category, sourced from tag_emails Google Sheet tab
+    const data = categoryRows(catName);
+    const sent = data.length;
+    const opened = data.filter(r=>r.read==='Yes').length;
+    const clicked = data.filter(r=>r.clicked==='Yes').length;
+    const notOpened = data.filter(r=>r.read==='No').length;
+    const openRate = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
+    const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
+    const cto = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
+    const domains = sent ? [...new Set(data.map(r=>r.email.split('@')[1]).filter(Boolean))].length : '—';
+    const openedNotClicked = opened - clicked;
+
+    // Update title & badge
+    document.getElementById('cat-title').textContent = catName;
+    document.getElementById('cat-badge').textContent = 'Email By Category';
+
+    // KPI cards
+    document.getElementById('cat-sent').textContent       = sent || '—';
+    document.getElementById('cat-opens').textContent      = opened || '—';
+    document.getElementById('cat-open-rate').textContent  = 'Open rate: ' + openRate;
+    document.getElementById('cat-clicks').textContent     = clicked || '—';
+    document.getElementById('cat-click-rate').textContent = 'Click rate: ' + clickRate;
+    document.getElementById('cat-notopen').textContent    = notOpened || '—';
+    document.getElementById('cat-notopen-pct').textContent= sent ? (notOpened/sent*100).toFixed(1)+'% of sent' : '— of sent';
+    document.getElementById('cat-cto').textContent        = cto;
+    document.getElementById('cat-orgs').textContent       = domains;
+    document.getElementById('cat-avg-open').textContent   = openRate;
+
+    // Funnel
+    document.getElementById('cat-funnel-label').textContent   = catName + ' Campaign';
+    document.getElementById('cat-funnel-sent-bar').textContent = sent || '—';
+    const openW = sent ? Math.max(3, (opened/sent*100)) : 3;
+    const clickW = sent ? Math.max(3, (clicked/sent*100)) : 3;
+    document.getElementById('cat-funnel-open-bar').textContent  = opened || '—';
+    document.getElementById('cat-funnel-open-bar').style.width  = openW + '%';
+    document.getElementById('cat-funnel-open-pct').textContent  = openRate;
+    document.getElementById('cat-funnel-click-bar').textContent = clicked || '—';
+    document.getElementById('cat-funnel-click-bar').style.width = clickW + '%';
+    document.getElementById('cat-funnel-click-pct').textContent = clickRate;
+
+    // Engagement
+    document.getElementById('cat-eg-clicked').textContent   = clicked || '—';
+    document.getElementById('cat-eg-opened').textContent    = openedNotClicked || '—';
+    document.getElementById('cat-eg-notopened').textContent = notOpened || '—';
+    document.getElementById('cat-recipient-count').textContent = sent + ' contacts';
+
+    // Donut
+    setTimeout(()=>drawCatDonut(clicked, openedNotClicked, notOpened, sent), 50);
+
+    // Table
+    catFiltered = [...data];
+    catPage = 1;
+    if(document.getElementById('catSearchInput')) document.getElementById('catSearchInput').value='';
+    if(document.getElementById('catFilterSel')) document.getElementById('catFilterSel').value='all';
+    renderCatTable();
+}
+
+function drawCatDonut(clicked, openedNot, notOpened, total) {
+    const c = document.getElementById('catDonut');
+    if(!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0,0,140,140);
+    if(!total){ return; }
+    const vals=[clicked, openedNot, notOpened], colors=['#10b981','#60a5fa','#4b5563'];
+    let start=-Math.PI/2;
+    vals.forEach((v,i)=>{
+        if(!v) return;
+        const angle=(v/total)*2*Math.PI;
+        ctx.beginPath();ctx.moveTo(70,70);ctx.arc(70,70,62,start,start+angle);ctx.closePath();
+        ctx.fillStyle=colors[i];ctx.fill();start+=angle;
+    });
+    ctx.beginPath();ctx.arc(70,70,36,0,2*Math.PI);ctx.fillStyle='#1a1d26';ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(total,70,70);
+}
+
+function filterCatRecipients() {
+    const q = document.getElementById('catSearchInput').value.toLowerCase();
+    const f = document.getElementById('catFilterSel').value;
+    const base = categoryRows(currentCategory);
+    catFiltered = base.filter(r => {
+        const mq = r.email.toLowerCase().includes(q);
+        const mf = f==='all'?true: f==='clicked'?r.clicked==='Yes': f==='opened'?r.read==='Yes': r.read==='No';
+        return mq && mf;
+    });
+    catPage = 1;
+    renderCatTable();
+}
+
+function renderCatTable() {
+    const start = (catPage-1)*catPerPage;
+    const rows = catFiltered.slice(start, start+catPerPage);
+    document.getElementById('catRecipientBody').innerHTML = rows.map(r=>`
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+        </tr>`).join('');
+    const total = catFiltered.length;
+    document.getElementById('catPageInfo').textContent = total ? `${start+1}–${Math.min(start+catPerPage,total)} of ${total}` : 'No results';
+}
+function catPrevPage(){ if(catPage>1){catPage--;renderCatTable();} }
+function catNextPage(){ if(catPage<Math.ceil(catFiltered.length/catPerPage)){catPage++;renderCatTable();} }
+
+// ===== DATA (populated from Google Sheets) =====
+let csvData = [];
+let orgData = [];
+const orgColors = ["#60a5fa","#34d399","#f87171","#fbbf24","#a78bfa","#fb923c","#4ade80","#38bdf8","#f472b6","#818cf8"];
+const hourlyData = {}
+
+// Maps "Category" / "Sign Up" page name -> keyword(s) to match in tag_emails Subject column.
+// Edit these keywords if your Mautic Subject lines use different wording.
+const categorySubjectMap = {
+    'Sign Up':     ['gold membership','exclusive access'],
+    'News':        ['news'],
+    'Chomp Show':  ['chomp show'],
+    'Academy':     ['academy'],
+    'Jobs':        ['jobs'],
+    'Resources':   ['resources'],
+    'Contact Us':  ['contact us'],
+    'Benefits':    ['benefits']
+};
+
+// Convert a raw tag_emails (or newsletter) sheet row into the {email,sent,read,clicked} shape
+// used throughout the existing render functions.
+function toRecipientRow(r) {
+    const sentRaw = r['Date sent'] || '';
+    let timeStr = sentRaw;
+    try { const d = new Date(sentRaw); if(!isNaN(d)) timeStr = d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}); } catch(e){}
+    return {
+        email: r['Email address'] || r['Contact Contact Primary Email'] || '',
+        sent: timeStr,
+        sentRaw: sentRaw,
+        // "Date read" has a value only if the recipient actually opened the email.
+        // The "Read" column itself is always "Yes" in the source sheet, so it's not used here.
+        read: (r['Date read']||'').trim() !== '' ? 'Yes':'No',
+        clicked: (r['Clicked']||'').toLowerCase()==='yes' ? 'Yes':'No'
+    };
+}
+
+// Returns recipient rows (in csvData shape) for a given category name, sourced from tag_emails sheet.
+function categoryRows(catName) {
+    const keywords = categorySubjectMap[catName] || [catName.toLowerCase()];
+    return gTagEmails
+        .filter(r => {
+            const subj = (r['Subject']||'').toLowerCase();
+            return keywords.some(k => subj.includes(k));
+        })
+        .filter(r => r['Email address'] || r['Contact Contact Primary Email'])
+        .map(toRecipientRow);
+}
+
+function rebuildOrgData(rows) {
+    const domainCount = {};
+    rows.forEach(r => { const d=r.email.split('@')[1]; if(d) domainCount[d]=(domainCount[d]||0)+1; });
+    return Object.entries(domainCount).sort((a,b)=>b[1]-a[1]).slice(0,15);
+}
+
+// Called after Google Sheet data loads: populate csvData with the "Sign Up" category (home/signup page default)
+function rebuildCoreData() {
+    csvData = categoryRows('Sign Up');
+    orgData = rebuildOrgData(csvData);
+}
+
+// ===== RECIPIENT TABLE =====
+let currentPage = 1;
+const perPage = 12;
+let filtered = [...csvData];
+
+function filterRecipients() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    const f = document.getElementById('filterSel').value;
+    filtered = csvData.filter(r => {
+        const mq = r.email.toLowerCase().includes(q);
+        const mf = f === 'all' ? true : f === 'clicked' ? r.clicked === 'Yes' : f === 'opened' ? r.read === 'Yes' : r.read === 'No';
+        return mq && mf;
+    });
+    currentPage = 1;
+    renderRecipients();
+}
+
+function renderRecipients() {
+    const start = (currentPage - 1) * perPage;
+    const rows = filtered.slice(start, start + perPage);
+    document.getElementById('recipientBody').innerHTML = rows.map(r => `
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
+            <td class="text-center">${r.read==='Yes' ? '<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>' : '<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.clicked==='Yes' ? '<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>' : '<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+        </tr>`).join('');
+    const total = filtered.length;
+    document.getElementById('pageInfo').textContent = `${start+1}–${Math.min(start+perPage,total)} of ${total}`;
+}
+function prevPage() { if (currentPage > 1) { currentPage--; renderRecipients(); } }
+function nextPage() { if (currentPage < Math.ceil(filtered.length/perPage)) { currentPage++; renderRecipients(); } }
+
+// ===== ORG LIST =====
+function renderOrgs() {
+    const container = document.getElementById('orgList');
+    if (!orgData.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-6">No data — upload CSV to populate</p>';
+        return;
+    }
+    const max = orgData[0][1];
+    container.innerHTML = orgData.map(([domain, count], i) => `
+        <div class="flex items-center gap-2">
+            <span class="text-[11px] text-gray-300 shrink-0" style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${domain}</span>
+            <div class="flex-1 bg-gray-800 rounded-full h-2">
+                <div class="h-2 rounded-full" style="width:${(count/max*100).toFixed(0)}%;background:${orgColors[i % orgColors.length]};"></div>
+            </div>
+            <span class="text-[11px] font-bold shrink-0 w-5 text-right" style="color:${orgColors[i % orgColors.length]};">${count}</span>
+        </div>`).join('');
+}
+
+
+
+// ===== DONUT CHART (Sign Up page) =====
+function drawDonut2() {
+    const c = document.getElementById('donutChart2');
+    if(!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0,0,150,150);
+
+    const total   = csvData.length;
+    const opened  = csvData.filter(r=>r.read==='Yes').length;
+    const clicked = csvData.filter(r=>r.clicked==='Yes').length;
+    const openedNotClicked = opened - clicked;
+    const notOpened = total - opened;
+
+    if(!total) {
+        ctx.beginPath(); ctx.arc(75,75,68,0,2*Math.PI); ctx.fillStyle='#232637'; ctx.fill();
+        ctx.beginPath(); ctx.arc(75,75,40,0,2*Math.PI); ctx.fillStyle='#1a1d26'; ctx.fill();
+        ctx.fillStyle='#4b5563'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('No data',75,75);
+        return;
+    }
+
+    const vals=[clicked, openedNotClicked, notOpened], colors=['#10b981','#60a5fa','#4b5563'];
+    let start=-Math.PI/2;
+    vals.forEach((v,i)=>{
+        if(!v) return;
+        const angle=(v/total)*2*Math.PI;
+        ctx.beginPath();ctx.moveTo(75,75);ctx.arc(75,75,68,start,start+angle);ctx.closePath();
+        ctx.fillStyle=colors[i];ctx.fill();start+=angle;
+    });
+    ctx.beginPath();ctx.arc(75,75,40,0,2*Math.PI);ctx.fillStyle='#1a1d26';ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(total,75,75);
+}
+
+// ===== EMAIL NURTURING BREAKDOWN =====
+const nurturingData = [
+    {id:'Email 001', varA:{name:'25200-00001 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00001 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 002', varA:{name:'25200-00002 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00002 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 003', varA:{name:'25200-00003 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00003 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 004', varA:{name:'25200-00004 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00004 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 005', varA:{name:'25200-00005 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00005 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 006', varA:{name:'25200-00006 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00006 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 007', varA:{name:'25200-00007 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00007 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 008', varA:{name:'25200-00008 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00008 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 009', varA:{name:'25200-00009 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00009 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 010', varA:{name:'25200-00010 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00010 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 011', varA:{name:'25200-00011 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00011 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 012', varA:{name:'25200-00012 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00012 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 013', varA:{name:'25200-00013 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00013 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+    {id:'Email 014', varA:{name:'25200-00014 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
+                     varB:{name:'25200-00014 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
+];
+
+function renderNurturing() {
+    const container = document.getElementById('nurturingEmails');
+    if(!container) return;
+    container.innerHTML = nurturingData.map(e => `
+        <div class="card-bg rounded-xl overflow-hidden">
+            <!-- Email header -->
+            <div class="flex items-center justify-between px-5 py-3" style="background:#1e2130; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <span class="text-sm font-bold" style="color:#60a5fa;">${e.id}</span>
+                <div class="flex items-center gap-6 text-xs text-gray-400">
+                    <span>Sent: <strong class="text-white">${e.varA.sent + e.varB.sent || '—'}</strong></span>
+                    <span>Opens: <strong class="text-white">${e.varA.read + e.varB.read || '—'}</strong></span>
+                    <span>Clicks: <strong class="text-white">${e.varA.clicks + e.varB.clicks || '—'}</strong></span>
+                    <span>Open Rate: <strong class="text-[#e8533a]">—</strong></span>
+                    <span>Click Rate: <strong class="text-[#e8533a]">—</strong></span>
+                </div>
+            </div>
+            <!-- Table -->
+            <table class="w-full text-[11px] text-left">
+                <thead>
+                    <tr class="text-gray-500 border-b border-gray-800/60" style="background:#161920;">
+                        <th class="py-2 px-5 font-semibold uppercase tracking-wider">Variant</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider">Name</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Sent</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Read Count</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Read Ratio</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Unique Clicks</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Click Ratio</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Not Open</th>
+                        <th class="py-2 px-3 font-semibold uppercase tracking-wider text-center">Not Open %</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800/30">
+                    ${varRow('A', e.varA)}
+                    ${varRow('B', e.varB)}
+                </tbody>
+            </table>
+        </div>
+    `).join('');
+}
+
+function varRow(label, v) {
+    const badgeColor = label==='A' ? '#3b82f6' : '#10b981';
+    const readColor  = v.readPct  === '—' ? '#6b7280' : '#10b981';
+    const clickColor = v.clickPct === '—' ? '#6b7280' : '#60a5fa';
+    return `
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-3 px-5">
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded text-white text-[10px] font-bold" style="background:${badgeColor};">${label}</span>
+            </td>
+            <td class="py-3 px-3 text-gray-300 font-medium">${v.name}</td>
+            <td class="py-3 px-3 text-center text-white">${v.sent || '—'}</td>
+            <td class="py-3 px-3 text-center text-white">${v.read || '—'}</td>
+            <td class="py-3 px-3 text-center">
+                <span class="font-bold" style="color:${readColor};">${v.readPct}</span>
+                ${v.readPct !== '—' ? `<div style="width:40px;height:3px;background:#10b981;border-radius:2px;margin:3px auto 0;"></div>` : ''}
+            </td>
+            <td class="py-3 px-3 text-center text-white">${v.clicks || '—'}</td>
+            <td class="py-3 px-3 text-center">
+                <span class="font-bold" style="color:${clickColor};">${v.clickPct}</span>
+                ${v.clickPct !== '—' ? `<div style="width:40px;height:3px;background:#3b82f6;border-radius:2px;margin:3px auto 0;"></div>` : ''}
+            </td>
+            <td class="py-3 px-3 text-center text-white">${v.notOpen || '—'}</td>
+            <td class="py-3 px-3 text-center text-gray-400">${v.notOpenPct}</td>
+        </tr>`;
+}
+
+// ===== SHOW REGISTRATION =====
+// ===== REGISTRATION DATA =====
+const regData = {
+    'Sign Up': {
+        submissions: 1240,
+        tags: [
+            { tag:'Sign_Up',              color:'#e8533a', trigger:'Sign Up form submission',  tagged:1240 },
+            { tag:'Pending_verification', color:'#60a5fa', trigger:'Auto-assigned on Sign Up', tagged:1240 }
+        ],
+        emailSent: 271
+    },
+    'Jobs': {
+        submissions: 390,
+        tags: [{ tag:'interest_jobs', color:'#10b981', trigger:'Jobs form submission', tagged:390 }],
+        emailSent: 0
+    },
+    'Chomp Show': {
+        submissions: 450,
+        tags: [{ tag:'requested_chomp_show', color:'#a78bfa', trigger:'Chomp Show form submission', tagged:450 }],
+        emailSent: 0
+    },
+    'Benefits': {
+        submissions: 510,
+        tags: [{ tag:'req_benefits', color:'#fbbf24', trigger:'Benefits form submission', tagged:510 }],
+        emailSent: 0
+    },
+    'Contact Us': {
+        submissions: 320,
+        tags: [{ tag:'intent_contact', color:'#f472b6', trigger:'Contact Us form submission', tagged:320 }],
+        emailSent: 0
+    }
+};
+
+const regNavIds = {
+    'Sign Up':'nav-reg-signup','Contact Us':'nav-reg-contact',
+    'Chomp Show':'nav-reg-chomp','Benefits':'nav-reg-benefits','Jobs':'nav-reg-jobs'
+};
+
+let currentRegName = '';
+let regFiltered = [];
+let regPage = 1;
+const regPerPage = 12;
+
+function showRegistration(name) {
+    currentRegName = name;
+    Object.values(regNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
+    const el = document.getElementById(regNavIds[name]);
+    if(el) el.classList.add('active');
+    showPage('page-registration', null);
+    document.getElementById('nav-registration').classList.add('active');
+
+    // Tags + base info still come from regData config (trigger labels/colors), but submissions count
+    // and email stats now come from live Google Sheets data.
+    const cfg = regData[name] || { tags:[] };
+    const formSubs = gForms.filter(r => (r['Name']||'').toLowerCase().includes(name.toLowerCase().split(' ')[0].toLowerCase()));
+    const submissions = formSubs.length || cfg.submissions || 0;
+    const emailData = categoryRows(name);
+    const sent     = emailData.length;
+    const opened   = emailData.filter(r=>r.read==='Yes').length;
+    const clicked  = emailData.filter(r=>r.clicked==='Yes').length;
+    const notOpen  = emailData.filter(r=>r.read==='No').length;
+    const openRate  = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
+    const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
+    const cto       = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
+    const notOpenPct= sent ? (notOpen/sent*100).toFixed(1)+'%' : '—';
+
+    // Header
+    document.getElementById('reg-title').textContent = 'Registration — ' + name;
+    document.getElementById('reg-badge').textContent = name;
+
+    // KPI cards
+    document.getElementById('reg-submissions').textContent = submissions || '—';
+    document.getElementById('reg-tags-count').textContent  = cfg.tags.reduce((a,t)=>a+t.tagged,0) || '—';
+    document.getElementById('reg-email-sent').textContent  = sent || '—';
+    document.getElementById('reg-opened').textContent      = opened || '—';
+    document.getElementById('reg-open-rate').textContent   = 'Open rate: ' + openRate;
+    document.getElementById('reg-clicked').textContent     = clicked || '—';
+    document.getElementById('reg-click-rate').textContent  = 'Click rate: ' + clickRate;
+    document.getElementById('reg-notopen').textContent     = notOpen || '—';
+    document.getElementById('reg-notopen-pct').textContent = notOpenPct + ' of sent';
+    document.getElementById('reg-cto').textContent         = cto;
+
+    // Assigned Tags cards
+    document.getElementById('reg-tag-cards').innerHTML = cfg.tags.map(t=>`
+        <div class="p-4 rounded-xl" style="background:#161920;border:1.5px solid ${t.color}33;">
+            <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-2">Tag Name</p>
+            <span class="font-mono text-sm font-bold px-3 py-1 rounded-lg" style="color:${t.color};background:${t.color}18;border:1px solid ${t.color}33;">${t.tag}</span>
+            <p class="text-[10px] text-gray-400 mt-2">${t.trigger}</p>
+            <p class="text-[10px] text-gray-500 mt-1">Assigned to: <strong class="text-white">${t.tagged}</strong> contacts</p>
+        </div>`).join('');
+
+    // Funnel
+    document.getElementById('reg-funnel-label').textContent = name + ' Campaign';
+    document.getElementById('reg-f-sent-bar').textContent   = sent || '—';
+    const openW  = sent ? Math.max(3,(opened/sent*100)) : 3;
+    const clickW = sent ? Math.max(3,(clicked/sent*100)) : 3;
+    document.getElementById('reg-f-open-bar').textContent   = opened || '—';
+    document.getElementById('reg-f-open-bar').style.width   = openW + '%';
+    document.getElementById('reg-f-open-pct').textContent   = openRate;
+    document.getElementById('reg-f-click-bar').textContent  = clicked || '—';
+    document.getElementById('reg-f-click-bar').style.width  = clickW + '%';
+    document.getElementById('reg-f-click-pct').textContent  = clickRate;
+
+    // Recipients
+    document.getElementById('reg-rec-count').textContent = (sent||0) + ' contacts';
+    regFiltered = [...emailData];
+    regPage = 1;
+    const srch=document.getElementById('regSearchInput'); if(srch) srch.value='';
+    const fsel=document.getElementById('regFilterSel');   if(fsel) fsel.value='all';
+    renderRegTable();
+}
+
+function filterRegRecipients() {
+    const q=document.getElementById('regSearchInput').value.toLowerCase();
+    const f=document.getElementById('regFilterSel').value;
+    const base = categoryRows(currentRegName || 'Sign Up');
+    regFiltered=base.filter(r=>{
+        const mq=r.email.toLowerCase().includes(q);
+        const mf=f==='all'?true:f==='clicked'?r.clicked==='Yes':f==='opened'?r.read==='Yes':r.read==='No';
+        return mq&&mf;
+    });
+    regPage=1; renderRegTable();
+}
+
+function renderRegTable() {
+    const start=(regPage-1)*regPerPage;
+    const rows=regFiltered.slice(start,start+regPerPage);
+    const tbody=document.getElementById('regRecipientBody');
+    if(!tbody) return;
+    tbody.innerHTML=rows.map(r=>`
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+        </tr>`).join('');
+    const total=regFiltered.length;
+    const info=document.getElementById('regPageInfo');
+    if(info) info.textContent=total?`${start+1}–${Math.min(start+regPerPage,total)} of ${total}`:'No results';
+}
+function regPrevPage(){ if(regPage>1){regPage--;renderRegTable();} }
+function regNextPage(){ if(regPage<Math.ceil(regFiltered.length/regPerPage)){regPage++;renderRegTable();} }
+
+// ===== EVENT OCCUR DATA =====
+const eoTagMap = {
+    'Sign Up':     { tag:'Sign_Up',            event:'Sign Up form submission',       hits:1240, tagged:892  },
+    'News':        { tag:'interest_news',       event:'News page visit',               hits:620,  tagged:415  },
+    'Blog':        { tag:'interest_topics',     event:'Blog post visit',               hits:840,  tagged:510  },
+    'Chomp Show':  { tag:'interest_chomp_show', event:'Chomp Show page visit',         hits:450,  tagged:280  },
+    'Academy':     { tag:'interest_training',   event:'Academy page visit',            hits:540,  tagged:390  },
+    'Jobs':        { tag:'interest_jobs',       event:'Jobs page visit',               hits:480,  tagged:310  },
+    'Contact Us':  { tag:'intent_contact',      event:'Contact Us form submission',    hits:320,  tagged:220  },
+    'Benefits':    { tag:'req_benefits',        event:'Benefits page visit/request',   hits:510,  tagged:360  },
+};
+
+const eoNavIds = {
+    'Sign Up':'nav-eo-signup','News':'nav-eo-news','Blog':'nav-eo-blog',
+    'Chomp Show':'nav-eo-chomp','Academy':'nav-eo-academy','Jobs':'nav-eo-jobs',
+    'Contact Us':'nav-eo-contact','Benefits':'nav-eo-benefits'
+};
+
+let currentEOName='', currentEOTag='', currentEOColor='';
+let eoFiltered = [];
+let eoPage = 1;
+const eoPerPage = 12;
+let currentEOTab = 'analytics';
+
+function showEventOccur(name, tag, color) {
+    currentEOName = name; currentEOTag = tag; currentEOColor = color;
+    Object.values(eoNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
+    const navEl = document.getElementById(eoNavIds[name]);
+    if(navEl) navEl.classList.add('active');
+    showPage('page-eventoccur', null);
+    document.getElementById('nav-eventoccur').classList.add('active');
+
+    const d = eoTagMap[name] || { tag: tag, event:'—', hits:0, tagged:0 };
+    const emailData = categoryRows(name);
+    const sent     = emailData.length;
+    const opened   = emailData.filter(r=>r.read==='Yes').length;
+    const clicked  = emailData.filter(r=>r.clicked==='Yes').length;
+    const notOpen  = emailData.filter(r=>r.read==='No').length;
+    const openRate  = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
+    const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
+    const cto       = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
+    const notOpenPct= sent ? (notOpen/sent*100).toFixed(1)+'%' : '—';
+
+    // Header
+    document.getElementById('eo-title').textContent     = name;
+    document.getElementById('eo-tag-badge').textContent = d.tag;
+
+    // KPI cards
+    document.getElementById('eo-hits').textContent      = d.hits || '—';
+    document.getElementById('eo-tagged').textContent    = d.tagged || '—';
+    document.getElementById('eo-triggered').textContent = sent || '—';
+    document.getElementById('eo-opened').textContent    = opened || '—';
+    document.getElementById('eo-open-rate').textContent = 'Open rate: ' + openRate;
+    document.getElementById('eo-clicked').textContent   = clicked || '—';
+    document.getElementById('eo-click-rate').textContent= 'Click rate: ' + clickRate;
+    document.getElementById('eo-notopen').textContent   = notOpen || '—';
+    document.getElementById('eo-notopen-pct').textContent = notOpenPct + ' of sent';
+    document.getElementById('eo-cto').textContent       = cto;
+
+    // Tag info
+    document.getElementById('eo-tagname').textContent       = d.tag;
+    document.getElementById('eo-trigger-event').textContent = d.event;
+    document.getElementById('eo-flow-tag').textContent      = d.tag;
+
+    // Funnel bars
+    document.getElementById('eo-f-hits').textContent      = d.hits || '—';
+    document.getElementById('eo-f-tagged').textContent    = d.tagged || '—';
+    document.getElementById('eo-f-triggered').textContent = sent || '—';
+    document.getElementById('eo-f-opened').textContent    = opened || '—';
+    document.getElementById('eo-f-clicked').textContent   = clicked || '—';
+    if(d.hits) {
+        document.getElementById('eo-f-tagged-bar').style.width    = Math.round(d.tagged/d.hits*100)+'%';
+        document.getElementById('eo-f-triggered-bar').style.width = sent ? Math.round(sent/d.hits*100)+'%' : '2%';
+        document.getElementById('eo-f-opened-bar').style.width    = sent ? Math.round(opened/d.hits*100)+'%' : '2%';
+        document.getElementById('eo-f-clicked-bar').style.width   = sent ? Math.round(clicked/d.hits*100)+'%' : '2%';
+    }
+
+    // Recipients
+    document.getElementById('eo-rec-count').textContent = (sent||0) + ' contacts';
+    eoFiltered = [...emailData];
+    eoPage = 1;
+    const srch = document.getElementById('eoSearchInput');
+    const fsel = document.getElementById('eoFilterSel');
+    if(srch) srch.value = '';
+    if(fsel) fsel.value = 'all';
+    renderEOTable();
+}
+
+// ===== EO RECIPIENT TABLE =====
+function filterEORecipients() {
+    const q = document.getElementById('eoSearchInput').value.toLowerCase();
+    const f = document.getElementById('eoFilterSel').value;
+    eoFiltered = categoryRows(currentEOName || 'Sign Up').filter(r => {
+        const mq = r.email.toLowerCase().includes(q);
+        const mf = f==='all'?true: f==='clicked'?r.clicked==='Yes': f==='opened'?r.read==='Yes': r.read==='No';
+        return mq && mf;
+    });
+    eoPage = 1;
+    renderEOTable();
+}
+
+function renderEOTable() {
+    const start = (eoPage-1)*eoPerPage;
+    const rows  = eoFiltered.slice(start, start+eoPerPage);
+    const tbody = document.getElementById('eoRecipientBody');
+    if(!tbody) return;
+    tbody.innerHTML = rows.map(r=>`
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+        </tr>`).join('');
+    const total = eoFiltered.length;
+    const info = document.getElementById('eoPageInfo');
+    if(info) info.textContent = total ? `${start+1}–${Math.min(start+eoPerPage,total)} of ${total}` : 'No results';
+}
+function eoPrevPage(){ if(eoPage>1){eoPage--;renderEOTable();} }
+function eoNextPage(){ if(eoPage<Math.ceil(eoFiltered.length/eoPerPage)){eoPage++;renderEOTable();} }
+
+
+// ===== NEWSLETTER DATA (built dynamically from 'newsletter' Google Sheet tab) =====
+// Each newsletter campaign is grouped by its Subject line (e.g. "...Weekly Newsletter | Jun 15, 2026")
+let nlWeeks = [];          // [{week,label,sent,read,clicked,rows:[...]}]
+let nlGroupsByRows = {};   // subject -> raw recipient rows (csvData shape)
+
+function rebuildNewsletterData() {
+    const groups = {}; // subject -> array of raw sheet rows
+    gNewsletter.forEach(r => {
+        const subj = r['Subject'] || 'Unknown Campaign';
+        if(!groups[subj]) groups[subj] = [];
+        groups[subj].push(r);
+    });
+    // Sort campaigns by most recent "Date sent" first
+    const subjects = Object.keys(groups).sort((a,b) => {
+        const da = new Date(groups[a][0]['Date sent']||0);
+        const db = new Date(groups[b][0]['Date sent']||0);
+        return db - da;
+    });
+    nlWeeks = subjects.map((subj, i) => {
+        const rawRows = groups[subj];
+        const rows = rawRows.map(toRecipientRow);
+        const sent = rows.length;
+        const read = rows.filter(r=>r.read==='Yes').length;
+        const clicked = rows.filter(r=>r.clicked==='Yes').length;
+        nlGroupsByRows[i] = rows;
+        return { week:'Week '+(i+1), label: subj, sent, read, clicked };
+    });
+    if(!nlWeeks.length) nlWeeks = [{week:'Week 1',label:'No newsletter data yet',sent:0,read:0,clicked:0}];
+}
+
+let nlSelectedWeek = 0;
+let nlFiltered = [];
+let nlPage = 1;
+const nlPerPage = 12;
+
+function showNewsletter() {
+    showPage('page-newsletter', 'nav-newsletter');
+    rebuildNewsletterData();
+    renderNLList();
+    selectNLWeek(0);
+}
+
+function renderNewsletter() { rebuildNewsletterData(); renderNLList(); selectNLWeek(nlSelectedWeek); }
+
+function renderNLList() {
+    const wcEl = document.getElementById('nl-weeks-count');
+    if(wcEl) wcEl.textContent = nlWeeks.length + (nlWeeks.length===1?' Campaign':' Campaigns');
+    const container = document.getElementById('nl-list');
+    container.innerHTML = nlWeeks.map((w, i) => {
+        const openRate  = w.sent ? (w.read/w.sent*100).toFixed(1)+'%' : '—';
+        const clickRate = w.sent ? (w.clicked/w.sent*100).toFixed(1)+'%' : '—';
+        const notOpen   = w.sent - w.read;
+        return `
+        <div onclick="selectNLWeek(${i})" id="nl-row-${i}"
+            class="flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition hover:bg-gray-800/40"
+            style="${i===nlSelectedWeek?'background:rgba(232,83,58,0.12); border-left:2px solid #e8533a;':'border-left:2px solid transparent;'}">
+            <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-newspaper text-[10px]" style="color:${i===nlSelectedWeek?'#e8533a':'#6b7280'};"></i>
+                <span class="text-xs font-semibold" style="color:${i===nlSelectedWeek?'#e8533a':'#d1d5db'};">${w.label}</span>
+            </div>
+            <div class="flex items-center gap-4 text-[10px]">
+                <span class="text-gray-400">Sent: <strong class="text-white">${w.sent||'—'}</strong></span>
+                <span class="text-gray-400">Read: <strong class="text-emerald-400">${w.read||'—'}</strong></span>
+                <span class="text-gray-400">Click: <strong class="text-purple-400">${w.clicked||'—'}</strong></span>
+                <span class="text-gray-400">Open: <strong class="text-amber-400">${openRate}</strong></span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function selectNLWeek(i) {
+    nlSelectedWeek = i;
+    renderNLList();
+
+    const w = nlWeeks[i];
+    const notOpen = w.sent - w.read;
+    const openedNotClicked = w.read - w.clicked;
+    const openRate  = w.sent ? (w.read/w.sent*100).toFixed(1)+'%' : '—';
+    const clickRate = w.sent ? (w.clicked/w.sent*100).toFixed(1)+'%' : '—';
+    const openW  = w.sent ? Math.max(3,(w.read/w.sent*100)) : 3;
+    const clickW = w.sent ? Math.max(3,(w.clicked/w.sent*100)) : 3;
+
+    // Funnel label & KPI
+    document.getElementById('nl-funnel-label').textContent = w.label;
+    document.getElementById('nl-kpi-sent').textContent    = w.sent || '—';
+    document.getElementById('nl-kpi-read').textContent    = w.read || '—';
+    document.getElementById('nl-kpi-click').textContent   = w.clicked || '—';
+    document.getElementById('nl-kpi-notopen').textContent = notOpen || '—';
+
+    // Funnel bars
+    document.getElementById('nl-f-sent-val').textContent  = w.sent || '—';
+    document.getElementById('nl-f-sent-pct').textContent  = '100%';
+    document.getElementById('nl-f-read-val').textContent  = w.read || '—';
+    document.getElementById('nl-f-read-pct').textContent  = openRate;
+    document.getElementById('nl-f-read-bar').style.width  = openW + '%';
+    document.getElementById('nl-f-click-val').textContent = w.clicked || '—';
+    document.getElementById('nl-f-click-pct').textContent = clickRate;
+    document.getElementById('nl-f-click-bar').style.width = clickW + '%';
+
+    // Engagement
+    document.getElementById('nl-eg-clicked').textContent   = w.clicked || '—';
+    document.getElementById('nl-eg-opened').textContent    = openedNotClicked || '—';
+    document.getElementById('nl-eg-notopened').textContent = notOpen || '—';
+    drawNLDonut(w.clicked, openedNotClicked, notOpen, w.sent);
+
+    // Recipients for the selected newsletter week, sourced from the Google Sheet
+    const emailData = nlGroupsByRows[i] || [];
+    // Sort: Clicked first, then Opened, then Not Opened
+    const sorted = [...emailData].sort((a,b) => {
+        const score = r => r.clicked==='Yes' ? 2 : r.read==='Yes' ? 1 : 0;
+        return score(b) - score(a);
+    });
+    document.getElementById('nl-rec-count').textContent = sorted.length + ' contacts';
+    nlFiltered = sorted;
+    nlPage = 1;
+    const srch=document.getElementById('nlSearchInput'); if(srch) srch.value='';
+    const fsel=document.getElementById('nlFilterSel');   if(fsel) fsel.value='all';
+    renderNLTable();
+}
+
+function drawNLDonut(clicked, openedNot, notOpened, total) {
+    const c = document.getElementById('nlDonut');
+    if(!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0,0,140,140);
+    if(!total) {
+        // empty state
+        ctx.beginPath(); ctx.arc(70,70,62,0,2*Math.PI);
+        ctx.fillStyle='#232637'; ctx.fill();
+        ctx.beginPath(); ctx.arc(70,70,36,0,2*Math.PI);
+        ctx.fillStyle='#1a1d26'; ctx.fill();
+        ctx.fillStyle='#4b5563'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('No data',70,70);
+        return;
+    }
+    const vals=[clicked, openedNot, notOpened], colors=['#10b981','#60a5fa','#4b5563'];
+    let start=-Math.PI/2;
+    vals.forEach((v,i)=>{
+        if(!v) return;
+        const angle=(v/total)*2*Math.PI;
+        ctx.beginPath(); ctx.moveTo(70,70); ctx.arc(70,70,62,start,start+angle); ctx.closePath();
+        ctx.fillStyle=colors[i]; ctx.fill(); start+=angle;
+    });
+    ctx.beginPath(); ctx.arc(70,70,36,0,2*Math.PI); ctx.fillStyle='#1a1d26'; ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(total,70,70);
+}
+
+function filterNLRecipients() {
+    const q=document.getElementById('nlSearchInput').value.toLowerCase();
+    const f=document.getElementById('nlFilterSel').value;
+    const base = nlGroupsByRows[nlSelectedWeek] || [];
+    const sorted = [...base].sort((a,b)=>{
+        const score=r=>r.clicked==='Yes'?2:r.read==='Yes'?1:0;
+        return score(b)-score(a);
+    });
+    nlFiltered = sorted.filter(r=>{
+        const mq=r.email.toLowerCase().includes(q);
+        const mf=f==='all'?true:f==='clicked'?r.clicked==='Yes':f==='opened'?r.read==='Yes':r.read==='No';
+        return mq&&mf;
+    });
+    nlPage=1; renderNLTable();
+}
+
+function renderNLTable() {
+    const start=(nlPage-1)*nlPerPage;
+    const rows=nlFiltered.slice(start,start+nlPerPage);
+    const tbody=document.getElementById('nlRecipientBody');
+    if(!tbody) return;
+    tbody.innerHTML = rows.length ? rows.map(r=>`
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+        </tr>`).join('') :
+        '<tr><td colspan="4" class="py-6 text-center text-gray-600 text-xs">No data — upload CSV to populate</td></tr>';
+    const total=nlFiltered.length;
+    const info=document.getElementById('nlPageInfo');
+    if(info) info.textContent=total?`${start+1}–${Math.min(start+nlPerPage,total)} of ${total}`:'';
+}
+function nlPrevPage(){ if(nlPage>1){nlPage--;renderNLTable();} }
+function nlNextPage(){ if(nlPage<Math.ceil(nlFiltered.length/nlPerPage)){nlPage++;renderNLTable();} }
+
+// ===== INIT: load from Google Sheets, then auto-refresh every 2 hours =====
+window.addEventListener('load', () => {
+    showHome();
+    loadAllData();
+    setInterval(loadAllData, REFRESH_MS);
+});
+</script>
+
+<!-- ===== NEWSLETTER PAGE ===== -->
+<div id="page-newsletter" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-5">
+        <button onclick="showHome()" class="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+        </button>
+        <i class="fa-solid fa-newspaper text-gray-300 text-xl"></i>
+        <h1 class="text-xl font-bold">Newsletter</h1>
+        <span class="text-[11px] text-gray-400 bg-gray-800/70 px-3 py-1 rounded-full">Weekly Campaign</span>
+    </div>
+
+    <!-- Top Section: Newsletter List + Funnel -->
+    <div class="grid grid-cols-2 gap-4 mb-4">
+
+        <!-- Newsletter List -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2">
+                    <i class="fa-solid fa-list text-gray-400 text-xs"></i> Newsletter Campaigns
+                </h3>
+                <span class="text-[10px] text-gray-500" id="nl-weeks-count">8 Weeks</span>
+            </div>
+            <div class="space-y-1" id="nl-list">
+                <!-- filled by JS -->
+            </div>
+        </div>
+
+        <!-- Email Funnel for selected week -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2">
+                    <i class="fa-solid fa-filter text-gray-400 text-xs"></i> Email Funnel
+                </h3>
+                <span class="text-[10px] text-gray-500" id="nl-funnel-label">Select a week</span>
+            </div>
+            <!-- KPI mini row -->
+            <div class="grid grid-cols-4 gap-2 mb-4">
+                <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
+                    <p class="text-[9px] text-gray-500 uppercase">Sent</p>
+                    <p class="text-base font-bold mt-0.5" style="color:#e8533a;" id="nl-kpi-sent">—</p>
+                </div>
+                <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
+                    <p class="text-[9px] text-gray-500 uppercase">Read</p>
+                    <p class="text-base font-bold mt-0.5 text-emerald-400" id="nl-kpi-read">—</p>
+                </div>
+                <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
+                    <p class="text-[9px] text-gray-500 uppercase">Click</p>
+                    <p class="text-base font-bold mt-0.5 text-purple-400" id="nl-kpi-click">—</p>
+                </div>
+                <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
+                    <p class="text-[9px] text-gray-500 uppercase">Not Open</p>
+                    <p class="text-base font-bold mt-0.5 text-red-400" id="nl-kpi-notopen">—</p>
+                </div>
+            </div>
+            <!-- Funnel bars -->
+            <div class="space-y-3">
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-400 mb-1"><span>Delivered</span><span id="nl-f-sent-pct">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-7 flex items-center">
+                        <div class="bg-blue-500 h-7 rounded-full flex items-center px-3" style="width:100%;">
+                            <span class="text-xs font-bold text-white" id="nl-f-sent-val">—</span>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-400 mb-1"><span>Opened</span><span id="nl-f-read-pct">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-7 flex items-center">
+                        <div class="bg-emerald-500 h-7 rounded-full flex items-center px-3" id="nl-f-read-bar" style="min-width:44px; width:0%;">
+                            <span class="text-xs font-bold text-white" id="nl-f-read-val">—</span>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[11px] text-gray-400 mb-1"><span>Clicked</span><span id="nl-f-click-pct">—</span></div>
+                    <div class="w-full bg-gray-800 rounded-full h-7 flex items-center">
+                        <div class="h-7 rounded-full flex items-center px-3" id="nl-f-click-bar" style="min-width:44px; width:0%; background:#e8533a;">
+                            <span class="text-xs font-bold text-white" id="nl-f-click-val">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom: Recipient Table + Engagement Donut -->
+    <div class="grid gap-4" style="grid-template-columns: 3fr 1.2fr;">
+
+        <!-- Recipient Table -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
+                <span class="text-[10px] text-gray-500" id="nl-rec-count">— contacts</span>
+            </div>
+            <div class="mb-3 flex gap-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                    <input id="nlSearchInput" type="text" placeholder="Search email..." oninput="filterNLRecipients()"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+                </div>
+                <select id="nlFilterSel" onchange="filterNLRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                    <option value="all">All</option>
+                    <option value="opened">Opened</option>
+                    <option value="not_opened">Not Opened</option>
+                    <option value="clicked">Clicked</option>
+                </select>
+            </div>
+            <div class="overflow-y-auto style-scrollbar" style="max-height:290px;">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="sticky top-0 bg-[#1a1d26]">
+                        <tr class="text-blue-400 border-b border-gray-800">
+                            <th class="pb-2 font-semibold">EMAIL</th>
+                            <th class="pb-2 font-semibold text-center">SENT</th>
+                            <th class="pb-2 font-semibold text-center">READ</th>
+                            <th class="pb-2 font-semibold text-center">CLICKED</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nlRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+                <span id="nlPageInfo" class="text-[10px] text-gray-500"></span>
+                <div class="flex gap-1">
+                    <button onclick="nlPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button onclick="nlNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Engagement Breakdown Donut -->
+        <div class="card-bg p-5 rounded-xl flex flex-col">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Engagement</h3>
+                <span class="text-[10px] text-gray-500">Breakdown</span>
+            </div>
+            <div class="flex flex-col items-center justify-center flex-1 gap-4">
+                <canvas id="nlDonut" width="140" height="140"></canvas>
+                <div class="space-y-2.5 w-full">
+                    <div class="flex items-center justify-between text-[11px]">
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span><span class="text-gray-300">Clicked</span></div>
+                        <span class="font-bold text-white" id="nl-eg-clicked">—</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px]">
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block"></span><span class="text-gray-300">Opened, not clicked</span></div>
+                        <span class="font-bold text-white" id="nl-eg-opened">—</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px]">
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-gray-600 inline-block"></span><span class="text-gray-300">Not opened</span></div>
+                        <span class="font-bold text-white" id="nl-eg-notopened">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- end page-newsletter -->
+
+</body>
 </html>
