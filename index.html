@@ -6,128 +6,6 @@
     <title>Restaurant Association - Full Email Analytics Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script>
-    // ===== GOOGLE SHEETS CONFIG =====
-    const SHEET_ID = '1cCDQWBuPU7bcq_690xhB2xHxRSvEGDyZ0f2S9cONS_8';
-    const SHEETS = { tag_emails:'tag_emails', newsletter:'newsletter', forms:'forms', contacts:'contacts' };
-    function sheetCSVUrl(tabName) {
-        return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-    }
-    const REFRESH_MS = 2 * 60 * 60 * 1000;
-    
-
-    let gTagEmails=[], gNewsletter=[], gForms=[], gContacts=[];
-    let dataLoaded=false, lastRefresh=null;
-
-    // Splits raw CSV text into rows, respecting quoted fields that may contain
-    // embedded commas or newlines (Google Sheets CSV export can produce these).
-    function splitCSVRows(text) {
-        const rows=[]; let row=[]; let cur=''; let inQ=false;
-        for(let i=0;i<text.length;i++){
-            const c=text[i];
-            if(c==='"'){
-                if(inQ && text[i+1]==='"'){ cur+='"'; i++; continue; }
-                inQ=!inQ; continue;
-            }
-            if(c===','&&!inQ){ row.push(cur); cur=''; continue; }
-            if((c==='\n'||c==='\r')&&!inQ){
-                if(c==='\r'&&text[i+1]==='\n') i++;
-                row.push(cur); cur='';
-                if(row.length>1||row[0]!=='') rows.push(row);
-                row=[]; continue;
-            }
-            cur+=c;
-        }
-        if(cur!==''||row.length){ row.push(cur); rows.push(row); }
-        return rows;
-    }
-    function parseSheetCSV(text) {
-        const rows=splitCSVRows(text.trim());
-        if(rows.length<2)return[];
-        const headers=rows[0].map(h=>h.trim());
-        return rows.slice(1).map(vals=>{
-            const obj={};
-            headers.forEach((h,i)=>obj[h]=(vals[i]||'').trim());
-            return obj;
-        }).filter(r=>Object.values(r).some(v=>v));
-    }
-    async function fetchSheet(tabName) {
-        const res=await fetch(sheetCSVUrl(tabName));
-        if(!res.ok)throw new Error('Failed: '+tabName);
-        return parseSheetCSV(await res.text());
-    }
-    async function loadAllData() {
-        showLoadingBanner('Loading data from Google Sheets...');
-        try {
-            const [te,nl,fm,ct]=await Promise.all([
-                fetchSheet(SHEETS.tag_emails), fetchSheet(SHEETS.newsletter),
-                fetchSheet(SHEETS.forms), fetchSheet(SHEETS.contacts)
-            ]);
-            gTagEmails=te; gNewsletter=nl; gForms=fm; gContacts=ct;
-            dataLoaded=true; lastRefresh=new Date();
-            rebuildCoreData();
-            updateRefreshBadge(); hideLoadingBanner(); refreshCurrentPage();
-        } catch(e) {
-            hideLoadingBanner();
-            showErrorBanner('Data load failed. Check Sheet is public.');
-            console.error(e);
-        }
-    }
-    function refreshCurrentPage() {
-        const active=document.querySelector('[id^="page-"].visible');
-        if(!active)return; const pid=active.id;
-        if(pid==='page-home')renderHome();
-        if(pid==='page-signup'){renderSignupKPIs();drawDonut2();renderRecipients();renderOrgs();}
-        if(pid==='page-nurturing')renderNurturing();
-        if(pid==='page-category'&&currentCategory)showCategory(currentCategory);
-        if(pid==='page-eventoccur'&&currentEOName)showEventOccur(currentEOName,currentEOTag,currentEOColor);
-        if(pid==='page-registration'&&currentRegName)showRegistration(currentRegName);
-        if(pid==='page-newsletter')renderNewsletter();
-    }
-    function showLoadingBanner(msg){
-        let b=document.getElementById('_loadBanner');
-        if(!b){b=document.createElement('div');b.id='_loadBanner';
-        b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#1e40af;color:#fff;text-align:center;font-size:12px;padding:6px;font-weight:600;';
-        document.body.appendChild(b);}
-        b.textContent=msg;b.style.display='block';
-    }
-    function hideLoadingBanner(){const b=document.getElementById('_loadBanner');if(b)b.style.display='none';}
-    function showErrorBanner(msg){
-        let b=document.getElementById('_errBanner');
-        if(!b){b=document.createElement('div');b.id='_errBanner';
-        b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#991b1b;color:#fff;text-align:center;font-size:12px;padding:6px;font-weight:600;cursor:pointer;';
-        b.onclick=()=>b.style.display='none';document.body.appendChild(b);}
-        b.textContent=msg+' (click to dismiss)';b.style.display='block';
-    }
-    function updateRefreshBadge(){
-        const el=document.getElementById('lastRefreshTime');
-        if(el&&lastRefresh)el.textContent='Updated: '+lastRefresh.toLocaleTimeString();
-    }
-    function rowStats(rows){
-        const sent=rows.length;
-        // NOTE: the "Read" column in the sheet is always "Yes" (it just means the email
-        // was queued/triggered to be tracked) — it does NOT mean the recipient opened it.
-        // The real "opened" signal is whether "Date read" has a value.
-        const opened=rows.filter(r=>(r['Date read']||'').trim()!=='').length;
-        const clicked=rows.filter(r=>(r['Clicked']||'').toLowerCase()==='yes').length;
-        const bounced=rows.filter(r=>(r['Bounced']||'').toLowerCase()==='yes').length;
-        const notOpen=sent-opened;
-        const domains=new Set(rows.map(r=>{
-            const e=r['Email address']||r['Contact Contact Primary Email']||'';
-            return e.split('@')[1];
-        }).filter(Boolean));
-        return{sent,opened,clicked,bounced,notOpen,orgs:domains.size};
-    }
-    function pct(a,b){return b?((a/b)*100).toFixed(1)+'%':'0%';}
-    function makeRecipientRows(rows){
-        return rows.map(r=>({
-            email: r['Email address']||r['Contact Contact Primary Email']||'',
-            sent:  r['Date sent']||'',
-            read:  (r['Date read']||'').trim()!==''?'Yes':'No',
-            clicked:(r['Clicked']||'').toLowerCase()==='yes'?'Yes':'No'
-        }));
-    }
-    </script>
     <style>
         body { background-color: #12141c; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .sidebar { background-color: #1a1d26; }
@@ -148,23 +26,23 @@
 
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar w-72 flex flex-col border-r border-gray-800 shrink-0" style="height:100vh;">
-    <!-- Logo -->
-    <div class="flex items-center gap-3 p-6 pb-4 shrink-0">
-        <div class="bg-red-500 p-2.5 rounded-xl text-white text-xl">
-            <i class="fa-solid fa-utensils"></i>
-        </div>
-        <div>
-            <h2 class="font-bold text-lg leading-tight cursor-pointer hover:text-[#e8533a] transition" onclick="showHome()">Restaurant Association</h2>
-            <p class="text-xs text-gray-400">Email Analytics Dashboard</p>
-        </div>
+    <!-- Logo (full logo, clickable -> home) -->
+    <div class="flex items-center justify-center p-6 pb-4 shrink-0">
+        <img src="https://g1.restaurantassociation.com/media/images/RA-Newsletter/May-26/RA-Logo.png"
+             alt="Restaurant Association — Email Analytics Dashboard"
+             class="max-h-14 w-auto object-contain cursor-pointer hover:opacity-80 transition"
+             onclick="showHome()"
+             onerror="this.onerror=null; this.outerHTML='&lt;div class=&quot;flex items-center gap-3 cursor-pointer&quot; onclick=&quot;showHome()&quot;&gt;&lt;div class=&quot;bg-red-500 p-2.5 rounded-xl text-white text-xl&quot;&gt;&lt;i class=&quot;fa-solid fa-utensils&quot;&gt;&lt;/i&gt;&lt;/div&gt;&lt;div&gt;&lt;h2 class=&quot;font-bold text-lg leading-tight&quot;&gt;Restaurant Association&lt;/h2&gt;&lt;p class=&quot;text-xs text-gray-400&quot;&gt;Email Analytics Dashboard&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;';">
     </div>
 
     <!-- Scrollable nav -->
     <nav class="flex-1 overflow-y-auto style-scrollbar px-6 space-y-1">
         <p class="text-xs font-semibold text-gray-500 tracking-wider uppercase mb-2 mt-1">Main</p>
+        <!-- Standalone "Sign Up" link — commented out per request; Sign Up now lives only under Email By Category below.
         <a onclick="showSignUp()" id="nav-signup" class="nav-link">
             <i class="fa-solid fa-fire text-[#e8533a]"></i> Sign Up
         </a>
+        -->
 
         <!-- Email By Category with sub-menu -->
         <div>
@@ -174,14 +52,17 @@
             </a>
             <div id="sub-emailcat" style="display:none; padding-left:16px; margin-top:4px; margin-bottom:4px;">
                 <div class="space-y-1" style="border-left: 2px solid rgba(245,158,11,0.3); padding-left:12px;">
-                    <a onclick="showCategory('Sign Up')"     id="nav-cat-signup"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Sign Up</a>
-                    <a onclick="showCategory('News')"        id="nav-cat-news"       class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> News</a>
-                    <a onclick="showCategory('Chomp Show')"  id="nav-cat-chomp"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Chomp Show</a>
-                    <a onclick="showCategory('Academy')"     id="nav-cat-academy"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Academy</a>
-                    <a onclick="showCategory('Jobs')"        id="nav-cat-jobs"       class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Jobs</a>
-                    <a onclick="showCategory('Resources')"   id="nav-cat-resources"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Resources</a>
-                    <a onclick="showCategory('Contact Us')"  id="nav-cat-contactus"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Contact Us</a>
-                    <a onclick="showCategory('Benefits')"    id="nav-cat-benefits"   class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Benefits</a>
+                    <a onclick="showCategory('Sign Up')"          id="nav-cat-signup"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Sign Up</a>
+                    <a onclick="showCategory('Follow Up Email')"  id="nav-cat-followup"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Follow Up Email</a>
+                    <a onclick="showCategory('News')"             id="nav-cat-news"        class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> News</a>
+                    <a onclick="showCategory('Resources')"        id="nav-cat-resources"   class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Resources</a>
+                    <a onclick="showCategory('Jobs')"             id="nav-cat-jobs"        class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Jobs</a>
+                    <a onclick="showCategory('Contact Us')"       id="nav-cat-contactus"   class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Contact Us</a>
+                    <a onclick="showCategory('Chomp Show')"       id="nav-cat-chomp"       class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Chomp Show</a>
+                    <a onclick="showCategory('Blog')"             id="nav-cat-blog"        class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Blog</a>
+                    <a onclick="showCategory('Academy')"          id="nav-cat-academy"     class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Academy</a>
+                    <a onclick="showCategory('Form Submission Email')" id="nav-cat-formsub" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Form Submission Email</a>
+                    <a onclick="showCategory('Internal Email')"   id="nav-cat-internal"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-500/60"></i> Internal Email</a>
                 </div>
             </div>
         </div>
@@ -190,7 +71,7 @@
             <i class="fa-solid fa-droplet text-blue-400"></i> Email Nurturing
         </a>
 
-        <!-- Event Occur -->
+        <!-- Event Occur — commented out for now per request, code preserved for later re-enable
         <div>
             <a onclick="toggleSidebarSection('eventoccur')" id="nav-eventoccur" class="nav-link" style="cursor:pointer;">
                 <span class="flex items-center gap-3"><i class="fa-solid fa-bullseye text-pink-500"></i> Event Occur</span>
@@ -209,36 +90,64 @@
                 </div>
             </div>
         </div>
+        -->
 
         <a onclick="showNewsletter()" id="nav-newsletter" class="nav-link" style="cursor:pointer;">
             <i class="fa-solid fa-newspaper text-gray-400"></i> Newsletter
         </a>
 
-        <!-- Registration -->
+        <!-- Registration Form -->
         <div>
             <a onclick="toggleSidebarSection('registration')" id="nav-registration" class="nav-link" style="cursor:pointer;">
-                <span class="flex items-center gap-3"><i class="fa-solid fa-clipboard-list text-amber-600"></i> Registration</span>
+                <span class="flex items-center gap-3"><i class="fa-solid fa-clipboard-list text-amber-600"></i> Registration Form</span>
                 <i id="chevron-registration" class="fa-solid fa-chevron-right text-xs text-gray-500 ml-auto" style="transition:transform 0.2s;"></i>
             </a>
             <div id="sub-registration" style="display:none; padding-left:16px; margin-top:4px; margin-bottom:4px;">
                 <div class="space-y-1" style="border-left: 2px solid rgba(217,119,6,0.3); padding-left:12px;">
-                    <a onclick="showRegistration('Sign Up')"    id="nav-reg-signup"   class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Sign Up</a>
-                    <a onclick="showRegistration('Contact Us')" id="nav-reg-contact"  class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Contact Us</a>
-                    <a onclick="showRegistration('Chomp Show')" id="nav-reg-chomp"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Chomp Show</a>
-                    <a onclick="showRegistration('Benefits')"   id="nav-reg-benefits" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Benefits</a>
-                    <a onclick="showRegistration('Jobs')"       id="nav-reg-jobs"     class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Jobs</a>
+                    <a onclick="showRegistration('Sign Up')"      id="nav-reg-signup"     class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Sign Up</a>
+                    <a onclick="showRegistration('Contact Us')"   id="nav-reg-contact"    class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Contact Us</a>
+                    <a onclick="showRegistration('Chomp Show')"   id="nav-reg-chomp"      class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Chomp Show</a>
+                    <a onclick="showRegistration('Jobs')"         id="nav-reg-jobs"       class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Jobs (Job Post)</a>
+                    <a onclick="showRegistration('Job Applied')"  id="nav-reg-jobapplied" class="nav-link text-xs" style="padding:6px 10px;"><i class="fa-solid fa-circle-dot text-[8px] text-amber-600/60"></i> Job Applied</a>
                 </div>
             </div>
         </div>
     </nav>
 
-    <!-- Auto-refresh status - fixed at bottom, always visible -->
-    <div class="p-6 pt-4 shrink-0 border-t border-gray-800">
-        <button onclick="loadAllData()" class="w-full text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm cursor-pointer hover:opacity-90" style="background:#e8533a;">
-            <i class="fa-solid fa-rotate"></i> Refresh Now
+    <!-- API Refresh Panel -->
+    <div class="p-4 pt-3 shrink-0 border-t border-gray-800">
+        <div class="mb-2">
+            <label class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1 block">Mautic Base URL</label>
+            <input id="api-base-url" type="text" placeholder="https://your-mautic.com"
+                value=""
+                class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+        </div>
+        <div class="mb-2 flex gap-2">
+            <div class="flex-1">
+                <label class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1 block">Date From</label>
+                <input id="api-date-from" type="date" value="2026-01-01"
+                    class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-200 focus:outline-none focus:border-[#e8533a]">
+            </div>
+            <div class="flex-1">
+                <label class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1 block">Date To</label>
+                <input id="api-date-to" type="date" id="api-date-to"
+                    class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-200 focus:outline-none focus:border-[#e8533a]">
+            </div>
+        </div>
+        <button onclick="fetchAllReports()" id="refresh-btn"
+            class="w-full text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm hover:opacity-90 active:scale-95"
+            style="background:#e8533a;">
+            <i class="fa-solid fa-rotate-right" id="refresh-icon"></i>
+            <span id="refresh-btn-text">Refresh Data</span>
         </button>
-        <p class="text-[10px] text-center text-gray-500 mt-2" id="lastRefreshTime">Loading...</p>
-        <p class="text-[9px] text-center text-gray-600 mt-0.5">Auto-refreshes every 2 hours</p>
+        <div id="upload-status" class="text-[10px] text-center text-gray-500 mt-2 uppercase tracking-wider">Enter base URL and click Refresh</div>
+        <!-- Progress bar -->
+        <div id="api-progress-bar" class="mt-2 hidden">
+            <div class="w-full bg-gray-800 rounded-full h-1.5">
+                <div id="api-progress-fill" class="h-1.5 rounded-full transition-all duration-300" style="width:0%; background:#e8533a;"></div>
+            </div>
+            <div id="api-progress-text" class="text-[9px] text-gray-500 mt-1 text-center"></div>
+        </div>
     </div>
 </div>
 
@@ -253,140 +162,75 @@
     <div class="grid grid-cols-7 gap-3 mb-8">
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-blue-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
-            <p class="text-xl font-bold mt-1 text-blue-400">198</p>
+            <p class="text-xl font-bold mt-1 text-blue-400" id="home-kpi-sent">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Total delivered</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-emerald-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Opens</p>
-            <p class="text-xl font-bold mt-1 text-emerald-400">107</p>
+            <p class="text-xl font-bold mt-1 text-emerald-400" id="home-kpi-opens">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Unique reads</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-purple-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Clicks</p>
-            <p class="text-xl font-bold mt-1 text-purple-400">8</p>
+            <p class="text-xl font-bold mt-1 text-purple-400" id="home-kpi-clicks">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Unique clicks</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-red-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
-            <p class="text-xl font-bold mt-1 text-red-400">91</p>
+            <p class="text-xl font-bold mt-1 text-red-400" id="home-kpi-notopen">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Not opened count</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-gray-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
-            <p class="text-xl font-bold mt-1 text-gray-300">0</p>
+            <p class="text-xl font-bold mt-1 text-gray-300" id="home-kpi-bounced">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-amber-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
-            <p class="text-xl font-bold mt-1 text-amber-400">54.0%</p>
+            <p class="text-xl font-bold mt-1 text-amber-400" id="home-kpi-openrate">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Read ratio avg</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-pink-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Click Rate</p>
-            <p class="text-xl font-bold mt-1 text-pink-400">4.0%</p>
+            <p class="text-xl font-bold mt-1 text-pink-400" id="home-kpi-clickrate">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Click ratio avg</p>
         </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-6 mb-8">
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
+    <div class="grid grid-cols-2 gap-6 mb-8" style="display:grid; grid-template-columns:1fr 1fr; align-items:stretch;">
+        <div class="card-bg p-5 rounded-xl flex flex-col" style="height:480px; max-height:480px;">
+            <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2 shrink-0">
                 <span class="flex items-center gap-2"><i class="fa-solid fa-folder text-amber-500 text-sm"></i><h3 class="text-sm font-semibold">Email By Category</h3></span>
                 <span class="text-[10px] text-gray-500 uppercase">All recipients</span>
             </div>
-            <table class="w-full text-xs text-left">
-                <thead><tr class="text-blue-400 border-b border-gray-800">
-                    <th class="pb-2 font-semibold">Category</th>
-                    <th class="pb-2 font-semibold text-center">Sent Count</th>
-                    <th class="pb-2 font-semibold text-center">Read Count</th>
-                    <th class="pb-2 font-semibold text-center">Click Count</th>
-                    <th class="pb-2 font-semibold text-center">Not Opened</th>
-                </tr></thead>
-                <tbody class="divide-y divide-gray-800/30" id="home-cat-table">
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Sign Up</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">News</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Chomp Show</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Academy</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Jobs</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Resources</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Contact Us</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                    <tr class="orange-text"><td class="py-1.5 font-medium">Benefits</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center text-red-400">-</td></tr>
-                </tbody>
-            </table>
+            <div class="overflow-y-auto style-scrollbar flex-1" style="min-height:0;">
+                <table class="w-full text-xs text-left">
+                    <thead><tr class="text-blue-400 border-b border-gray-800">
+                        <th class="pb-2 font-semibold">Category</th>
+                        <th class="pb-2 font-semibold text-center">Sent Count</th>
+                        <th class="pb-2 font-semibold text-center">Read Count</th>
+                        <th class="pb-2 font-semibold text-center">Click Count</th>
+                        <th class="pb-2 font-semibold text-center">Not Opened</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-800/30" id="home-cat-table">
+                        <!-- rows generated dynamically by renderHome() from categoryOrder -->
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        <div class="card-bg p-5 rounded-xl flex flex-col">
-            <div class="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
+        <div class="card-bg p-5 rounded-xl flex flex-col" style="height:480px; max-height:480px;">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-2 mb-3 shrink-0">
                 <span class="flex items-center gap-2"><i class="fa-solid fa-bullseye text-pink-500 text-sm"></i><h3 class="text-sm font-semibold">Event Occur (Tag Tracking)</h3></span>
                 <span class="text-[10px] text-gray-400 font-medium tracking-wider bg-gray-800/60 px-2 py-0.5 rounded uppercase">All Recipients</span>
             </div>
-            <div class="space-y-2 max-h-[220px] overflow-y-auto pr-1 style-scrollbar flex-1">
-                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-semibold text-white">Sign Up</span>
-                        <span class="text-[9px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-2 py-0.5 rounded-full font-mono">Sign_Up</span>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-gray-400">
-                        <span>Hits: <strong class="text-gray-200">1,240</strong></span>
-                        <span>Tags Assigned: <strong class="text-emerald-400">892 Users</strong></span>
-                    </div>
-                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-pink-500 h-full rounded-full" style="width:75%"></div></div>
-                </div>
-                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-semibold text-white">News</span>
-                        <span class="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full font-mono">interest_news</span>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-gray-400">
-                        <span>Hits: <strong class="text-gray-200">620</strong></span>
-                        <span>Tags Assigned: <strong class="text-emerald-400">415 Users</strong></span>
-                    </div>
-                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-blue-500 h-full rounded-full" style="width:45%"></div></div>
-                </div>
-                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-semibold text-white">Blog</span>
-                        <span class="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-mono">interest_topics</span>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-gray-400">
-                        <span>Hits: <strong class="text-gray-200">840</strong></span>
-                        <span>Tags Assigned: <strong class="text-emerald-400">510 Users</strong></span>
-                    </div>
-                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-amber-500 h-full rounded-full" style="width:60%"></div></div>
-                </div>
-                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-semibold text-white">Chomp Video</span>
-                        <span class="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full font-mono">interest_video</span>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-gray-400">
-                        <span>Hits: <strong class="text-gray-200">310</strong></span>
-                        <span>Tags Assigned: <strong class="text-emerald-400">198 Users</strong></span>
-                    </div>
-                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-purple-500 h-full rounded-full" style="width:30%"></div></div>
-                </div>
-                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-semibold text-white">Chomp Show</span>
-                        <span class="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-mono">interest_chomp_show</span>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-gray-400">
-                        <span>Hits: <strong class="text-gray-200">450</strong></span>
-                        <span>Tags Assigned: <strong class="text-emerald-400">280 Users</strong></span>
-                    </div>
-                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-indigo-500 h-full rounded-full" style="width:40%"></div></div>
-                </div>
-                <div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 hover:border-pink-500/30 transition flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-semibold text-white">Academy</span>
-                        <span class="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full font-mono">interest_training</span>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-gray-400">
-                        <span>Hits: <strong class="text-gray-200">540</strong></span>
-                        <span>Tags Assigned: <strong class="text-emerald-400">390 Users</strong></span>
-                    </div>
-                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="bg-orange-500 h-full rounded-full" style="width:50%"></div></div>
-                </div>
+            <div class="space-y-2 overflow-y-auto pr-1 style-scrollbar flex-1" id="home-eo-list" style="min-height:0;">
+                <!-- filled dynamically by renderHome() from categoryOrder + engagementData.
+                     Both cards are locked to a fixed height:480px/max-height:480px so they're
+                     always symmetrical regardless of content length or whether the Tailwind
+                     grid utility loads correctly. flex-1 on this scrollable area lets it fill
+                     the remaining space below the header, and style-scrollbar kicks in
+                     automatically once content (11 categories) exceeds that space. -->
             </div>
         </div>
 
@@ -417,8 +261,8 @@
 
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
-                <span class="flex items-center gap-2"><i class="fa-solid fa-clipboard-list text-amber-500 text-sm"></i><h3 class="text-sm font-semibold">Registration / Web-Form Pipeline</h3></span>
-                <span class="text-[9px] text-emerald-400 font-bold bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900/40 uppercase">Automation Active</span>
+                <span class="flex items-center gap-2"><i class="fa-solid fa-clipboard-list text-amber-500 text-sm"></i><h3 class="text-sm font-semibold">Registration Form</h3></span>
+                <span class="text-[9px] text-gray-400 font-bold bg-gray-800/50 px-2 py-0.5 rounded border border-gray-700/40 uppercase" id="home-reg-source-badge">Upload Forms CSV</span>
             </div>
             <table class="w-full text-xs text-left">
                 <thead><tr class="text-blue-400 border-b border-gray-800">
@@ -427,12 +271,12 @@
                     <th class="pb-2 font-semibold text-center">Assigned Mautic Tag</th>
                     <th class="pb-2 font-semibold text-center">Email Sent Status</th>
                 </tr></thead>
-                <tbody class="divide-y divide-gray-800/30" id="home-reg-table">
-                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Sign Up</td><td class="text-center text-white font-semibold">1,240</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">Sign_Up</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 99.1% Success</td></tr>
-                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Contact Us</td><td class="text-center text-white font-semibold">320</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">intent_contact</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 100% Sent</td></tr>
-                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Chomp Show</td><td class="text-center text-white font-semibold">450</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">interest_chomp_show</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 98.4% Sent</td></tr>
-                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Benefits</td><td class="text-center text-white font-semibold">510</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">requested_chomp_show</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> 99.5% Sent</td></tr>
-                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Jobs</td><td class="text-center text-white font-semibold">390</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">interest_jobs</span></td><td class="text-center text-amber-400 font-medium"><i class="fa-solid fa-spinner animate-spin mr-1"></i> 91.2% Processing</td></tr>
+                <tbody class="divide-y divide-gray-800/30">
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Sign Up</td><td class="text-center text-white font-semibold" id="home-reg-sub-signup">-</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">Sign_Up</span></td><td class="text-center text-emerald-400 font-medium" id="reg-su-status">—</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Contact Us</td><td class="text-center text-white font-semibold" id="home-reg-sub-contactus">-</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">intent_contact</span></td><td class="text-center text-gray-500 font-medium">—</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Chomp Show</td><td class="text-center text-white font-semibold" id="home-reg-sub-chomp">-</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">requested_chomp_show</span></td><td class="text-center text-gray-500 font-medium">—</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Jobs (Job Post)</td><td class="text-center text-white font-semibold" id="home-reg-sub-jobs">-</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">interest_jobs</span></td><td class="text-center text-gray-500 font-medium">—</td></tr>
+                    <tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">Job Applied</td><td class="text-center text-white font-semibold" id="home-reg-sub-jobapplied">-</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">job_applied</span></td><td class="text-center text-gray-500 font-medium">—</td></tr>
                 </tbody>
             </table>
         </div>
@@ -455,13 +299,69 @@
                     <th class="pb-3 font-semibold text-center">Not Open</th>
                     <th class="pb-3 font-semibold text-center">Not Open %</th>
                 </tr></thead>
-                <tbody class="divide-y divide-gray-800/40 text-center">
+                <tbody class="divide-y divide-gray-800/40 text-center" id="home-nurture-table">
                     <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 001</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
                     <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 002</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
                     <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 003</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
                     <tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">Email 004</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- Row: Recipient Activity + Top Organisations (Sign Up recipients, from the master Recipients CSV) -->
+    <div class="grid gap-4 mb-4" style="grid-template-columns:3fr 2fr;">
+
+        <!-- Recipient Activity -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
+                <span class="text-[10px] text-gray-500 bg-gray-800/60 px-2 py-0.5 rounded ml-2">Sign Up</span>
+                <span class="text-[10px] text-gray-500 ml-auto" id="home-rec-count">— contacts</span>
+            </div>
+            <div class="mb-3 flex gap-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                    <input id="homeSearchInput" type="text" placeholder="Search email..." oninput="filterHomeRecipients()"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+                </div>
+                <select id="homeFilterSel" onchange="filterHomeRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                    <option value="all">All</option>
+                    <option value="opened">Opened</option>
+                    <option value="not_opened">Not Opened</option>
+                    <option value="clicked">Clicked</option>
+                </select>
+            </div>
+            <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="sticky top-0 bg-[#1a1d26]">
+                        <tr class="text-blue-400 border-b border-gray-800">
+                            <th class="pb-2 font-semibold">EMAIL</th>
+                            <th class="pb-2 font-semibold text-center">SENT</th>
+                            <th class="pb-2 font-semibold text-center">READ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="homeRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+                <span id="homePageInfo" class="text-[10px] text-gray-500"></span>
+                <div class="flex gap-1">
+                    <button onclick="homePrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button onclick="homeNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Organisations -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Top Organisations</h3>
+                <span class="text-[10px] text-gray-500">By email count</span>
+            </div>
+            <div id="home-orgs-list" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;">
+                <p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>
+            </div>
         </div>
     </div>
 </div>
@@ -671,7 +571,7 @@
                 <h3 class="text-sm font-semibold">Top Organisations</h3>
                 <span class="text-[10px] text-gray-500">By email count</span>
             </div>
-            <div id="orgList" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:340px;"></div>
+            <div id="orgList" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;"></div>
         </div>
     </div>
 
@@ -689,7 +589,10 @@
         </button>
         <i class="fa-solid fa-droplet text-blue-400 text-xl"></i>
         <h1 class="text-xl font-bold">Email Nurturing</h1>
-        <span class="text-[11px] text-blue-400 bg-blue-900/30 border border-blue-800/40 px-3 py-1 rounded-full font-semibold">14 Emails</span>
+        <span class="text-[11px] text-blue-400 bg-blue-900/30 border border-blue-800/40 px-3 py-1 rounded-full font-semibold" id="nurture-email-count">0 Emails</span>
+        <span class="ml-auto text-[11px] text-gray-600 bg-gray-800/40 border border-gray-700/40 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <i class="fa-solid fa-cloud-arrow-down text-[10px]"></i> Via API Refresh
+        </span>
     </div>
 
     <!-- KPI Cards -->
@@ -698,7 +601,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Sent</p>
-                    <p class="text-2xl font-bold mt-1" style="color:#e8533a;">—</p>
+                    <p class="text-2xl font-bold mt-1" style="color:#e8533a;" id="nurture-sent">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Emails sent</p>
                 </div>
                 <i class="fa-solid fa-envelope text-gray-700 text-lg mt-1"></i>
@@ -708,7 +611,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Opens</p>
-                    <p class="text-2xl font-bold mt-1 text-blue-400">—</p>
+                    <p class="text-2xl font-bold mt-1 text-blue-400" id="nurture-opens">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Unique reads</p>
                 </div>
                 <i class="fa-regular fa-eye text-gray-700 text-lg mt-1"></i>
@@ -718,7 +621,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total Clicks</p>
-                    <p class="text-2xl font-bold mt-1 text-emerald-400">—</p>
+                    <p class="text-2xl font-bold mt-1 text-emerald-400" id="nurture-clicks">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Unique clicks</p>
                 </div>
                 <i class="fa-regular fa-hand-pointer text-gray-700 text-lg mt-1"></i>
@@ -728,7 +631,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Not Opened</p>
-                    <p class="text-2xl font-bold mt-1 text-red-400">—</p>
+                    <p class="text-2xl font-bold mt-1 text-red-400" id="nurture-notopen">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Not opened count</p>
                 </div>
                 <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
@@ -740,7 +643,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
-                    <p class="text-2xl font-bold mt-1 text-amber-400">—</p>
+                    <p class="text-2xl font-bold mt-1 text-amber-400" id="nurture-openrate">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Read ratio avg</p>
                 </div>
                 <i class="fa-solid fa-percent text-gray-700 text-lg mt-1"></i>
@@ -750,7 +653,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Click Rate</p>
-                    <p class="text-2xl font-bold mt-1 text-purple-400">—</p>
+                    <p class="text-2xl font-bold mt-1 text-purple-400" id="nurture-clickrate">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Click ratio avg</p>
                 </div>
                 <i class="fa-solid fa-chart-bar text-gray-700 text-lg mt-1"></i>
@@ -760,7 +663,7 @@
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
-                    <p class="text-2xl font-bold mt-1 text-gray-300">—</p>
+                    <p class="text-2xl font-bold mt-1 text-gray-300" id="nurture-bounced">—</p>
                     <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
                 </div>
                 <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
@@ -769,11 +672,11 @@
         <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
             <div class="flex justify-between items-start">
                 <div>
-                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Organisations</p>
-                    <p class="text-2xl font-bold mt-1 text-pink-400">—</p>
-                    <p class="text-[9px] text-gray-500 mt-0.5">Unique email domains</p>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Email Variants</p>
+                    <p class="text-2xl font-bold mt-1 text-pink-400" id="nurture-variants">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">A/B variants tracked</p>
                 </div>
-                <i class="fa-solid fa-building text-gray-700 text-lg mt-1"></i>
+                <i class="fa-solid fa-code-branch text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
     </div>
@@ -856,11 +759,11 @@
         <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
             <div class="flex justify-between items-start">
                 <div>
-                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Organisations</p>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
                     <p class="text-2xl font-bold mt-1 text-purple-400" id="cat-orgs">—</p>
-                    <p class="text-[9px] text-gray-500 mt-0.5">Unique email domains</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
                 </div>
-                <i class="fa-solid fa-building text-gray-700 text-lg mt-1"></i>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
         <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
@@ -942,43 +845,57 @@
         </div>
     </div>
 
-    <!-- Recipient Activity -->
-    <div class="card-bg p-5 rounded-xl">
-        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-            <h3 class="text-sm font-semibold">Recipient Activity</h3>
-            <span class="text-[10px] text-gray-500" id="cat-recipient-count">— contacts</span>
-        </div>
-        <div class="mb-3 flex gap-2">
-            <div class="relative flex-1">
-                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                <input id="catSearchInput" type="text" placeholder="Search email..." oninput="filterCatRecipients()"
-                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+    <!-- Row 3: Recipient Activity + Top Organisations -->
+    <div class="grid gap-4 mb-4" style="grid-template-columns:3fr 2fr;">
+
+        <!-- Recipient Activity -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
+                <span class="text-[10px] text-gray-500" id="cat-recipient-count">— contacts</span>
             </div>
-            <select id="catFilterSel" onchange="filterCatRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                <option value="all">All</option>
-                <option value="opened">Opened</option>
-                <option value="not_opened">Not Opened</option>
-                <option value="clicked">Clicked</option>
-            </select>
+            <div class="mb-3 flex gap-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                    <input id="catSearchInput" type="text" placeholder="Search email..." oninput="filterCatRecipients()"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+                </div>
+                <select id="catFilterSel" onchange="filterCatRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                    <option value="all">All</option>
+                    <option value="opened">Opened</option>
+                    <option value="not_opened">Not Opened</option>
+                    <option value="clicked">Clicked</option>
+                </select>
+            </div>
+            <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="sticky top-0 bg-[#1a1d26]">
+                        <tr class="text-blue-400 border-b border-gray-800">
+                            <th class="pb-2 font-semibold">EMAIL</th>
+                            <th class="pb-2 font-semibold text-center">SENT</th>
+                            <th class="pb-2 font-semibold text-center">READ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="catRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+                <span id="catPageInfo" class="text-[10px] text-gray-500"></span>
+                <div class="flex gap-1">
+                    <button onclick="catPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button onclick="catNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
         </div>
-        <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
-            <table class="w-full text-[11px] text-left">
-                <thead class="sticky top-0 bg-[#1a1d26]">
-                    <tr class="text-blue-400 border-b border-gray-800">
-                        <th class="pb-2 font-semibold">EMAIL</th>
-                        <th class="pb-2 font-semibold text-center">SENT</th>
-                        <th class="pb-2 font-semibold text-center">READ</th>
-                        <th class="pb-2 font-semibold text-center">CLICKED</th>
-                    </tr>
-                </thead>
-                <tbody id="catRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-            </table>
-        </div>
-        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-            <span id="catPageInfo" class="text-[10px] text-gray-500"></span>
-            <div class="flex gap-1">
-                <button onclick="catPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                <button onclick="catNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+
+        <!-- Top Organisations -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Top Organisations</h3>
+                <span class="text-[10px] text-gray-500">By email count</span>
+            </div>
+            <div class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;" id="cat-orgs-list">
+                <p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>
             </div>
         </div>
     </div>
@@ -1184,6 +1101,10 @@
         <i class="fa-solid fa-clipboard-list text-amber-500 text-xl"></i>
         <h1 class="text-xl font-bold" id="reg-title">Registration</h1>
         <span class="text-[11px] text-amber-400 bg-amber-900/20 border border-amber-800/30 px-3 py-1 rounded-full font-semibold" id="reg-badge">—</span>
+        <label class="ml-auto text-[11px] text-gray-300 bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-arrow-up-from-bracket text-[10px]"></i> Upload Forms CSV
+            <input type="file" accept=".csv" class="hidden" onchange="handleAnyCSVUpload(event)" multiple>
+        </label>
     </div>
 
     <!-- KPI Cards Row 1 -->
@@ -1318,7 +1239,6 @@
                         <th class="pb-2 font-semibold">EMAIL</th>
                         <th class="pb-2 font-semibold text-center">SENT</th>
                         <th class="pb-2 font-semibold text-center">READ</th>
-                        <th class="pb-2 font-semibold text-center">CLICKED</th>
                     </tr>
                 </thead>
                 <tbody id="regRecipientBody" class="divide-y divide-gray-800/30"></tbody>
@@ -1364,95 +1284,243 @@ function showPage(pageId, navId) {
 }
 function showHome()     { showPage('page-home', null); renderHome(); }
 
+// Fills the home page from csvData (the uploaded tag_emails CSV).
+// Only Sign Up has real data right now. "Hits" (page visits) and "Tags Assigned"
+// (unique tagged contacts) are DIFFERENT metrics from email sent/opened/clicked —
+// they come from Mautic's page-tracking / contacts CSV, not tag_emails, so they
+// stay "—" here rather than being filled with email numbers.
 function renderHome() {
-    if (!dataLoaded) return;
-    // Category summary table
-    const catNames = Object.keys(categorySubjectMap);
+    const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
+
+    // Top 7 KPI cards now reflect the "Sign Up" category from the All-Engagement CSV
+    const su = engagementData['Sign Up'];
+    if (su) {
+        const notOpen = su.sent - su.read;
+        set('home-kpi-sent', su.sent);
+        set('home-kpi-opens', su.read);
+        set('home-kpi-clicks', su.clicked);
+        set('home-kpi-notopen', notOpen);
+        set('home-kpi-bounced', su.bounced);
+        set('home-kpi-openrate', pct(su.read, su.sent));
+        set('home-kpi-clickrate', pct(su.clicked, su.sent));
+    }
+
+    // Email By Category table — fully dynamic from categoryOrder + engagementData.
+    // Rows are clickable, jumping straight to that category's detail page.
     const catTbody = document.getElementById('home-cat-table');
     if (catTbody) {
-        catTbody.innerHTML = catNames.map(name => {
-            const rows = categoryRows(name);
-            const s = rowStats(rows);
-            return `<tr class="orange-text"><td class="py-1.5 font-medium">${name}</td><td class="text-center">${s.sent||'-'}</td><td class="text-center">${s.opened||'-'}</td><td class="text-center">${s.clicked||'-'}</td><td class="text-center text-red-400">${s.notOpen||'-'}</td></tr>`;
+        catTbody.innerHTML = categoryOrder.map(cat => {
+            const eg = engagementData[cat];
+            const sent = eg ? eg.sent : null;
+            const read = eg ? eg.read : null;
+            const clicked = eg ? eg.clicked : null;
+            const notOpen = eg ? (eg.sent - eg.read) : null;
+            return `<tr class="orange-text" style="cursor:pointer;" onclick="showCategory('${cat}')">
+                <td class="py-1.5 font-medium">${cat}</td>
+                <td class="text-center">${sent != null ? sent : '-'}</td>
+                <td class="text-center">${read != null ? read : '-'}</td>
+                <td class="text-center">${clicked != null ? clicked : '-'}</td>
+                <td class="text-center text-red-400">${notOpen != null ? notOpen : '-'}</td>
+            </tr>`;
         }).join('');
     }
-    // Newsletter summary table (top 8 most recent campaigns)
-    rebuildNewsletterData();
-    const nlTbody = document.getElementById('home-nl-table');
-    if (nlTbody) {
-        const top8 = nlWeeks.slice(0, 8);
-        nlTbody.innerHTML = top8.length ? top8.map(w =>
-            `<tr class="orange-text"><td class="py-1.5 font-medium" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.label}</td><td class="text-center">${w.sent||'-'}</td><td class="text-center">${w.read||'-'}</td><td class="text-center">${w.clicked||'-'}</td></tr>`
-        ).join('') : '<tr><td colspan="4" class="py-3 text-center text-gray-600 text-xs">No newsletter data</td></tr>';
+
+    // Event Occur (Tag Tracking) widget — fully dynamic from categoryOrder + engagementData.
+    // Per the actual Mautic flow: a contact must already have the tag assigned BEFORE the
+    // triggered email goes out, so "Hits" (tag-trigger events) and "Tags Assigned" both
+    // equal the Sent count for that category — there's no separate page-visit data source.
+    // Colors are inline hex (not Tailwind utility classes) so they render reliably
+    // regardless of when the JIT compiler scans the DOM.
+    const eoTagInfo = {
+        'Sign Up':               { tag:'Sign_Up',              hex:'#ec4899' },
+        'Follow Up Email':       { tag:'Sign_Up_followup',     hex:'#f43f5e' },
+        'News':                  { tag:'interest_news',        hex:'#3b82f6' },
+        'Resources':             { tag:'interest_resources',   hex:'#06b6d4' },
+        'Jobs':                  { tag:'interest_jobs',        hex:'#10b981' },
+        'Contact Us':            { tag:'intent_contact',       hex:'#a855f7' },
+        'Chomp Show':            { tag:'interest_chomp_show',  hex:'#6366f1' },
+        'Blog':                  { tag:'interest_topics',      hex:'#f59e0b' },
+        'Academy':               { tag:'interest_training',    hex:'#f97316' },
+        'Form Submission Email': { tag:'form_submitted',       hex:'#14b8a6' },
+        'Internal Email':        { tag:'internal_team',        hex:'#9ca3af' }
+    };
+    const eoList = document.getElementById('home-eo-list');
+    if (eoList) {
+        const anyData = categoryOrder.some(cat => engagementData[cat]);
+        if (!anyData) {
+            eoList.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — upload the All-Engagement CSV above.</p>';
+        } else {
+            const maxSent = Math.max(1, ...categoryOrder.map(c => engagementData[c] ? engagementData[c].sent : 0));
+            eoList.innerHTML = categoryOrder.map(cat => {
+                const eg = engagementData[cat];
+                const info = eoTagInfo[cat] || { tag: cat, hex:'#9ca3af' };
+                const sent = eg ? eg.sent : null;
+                const barW = sent ? Math.max(3, (sent / maxSent) * 100) : 0;
+                return `<div class="bg-[#161920] p-2.5 rounded-lg border border-gray-800/60 transition flex flex-col gap-1.5" style="border-color:${info.hex}1a;" onmouseover="this.style.borderColor='${info.hex}4d'" onmouseout="this.style.borderColor='${info.hex}1a'">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-semibold text-white">${cat}</span>
+                        <span class="text-[9px] px-2 py-0.5 rounded-full font-mono" style="background:${info.hex}1a;color:${info.hex};border:1px solid ${info.hex}33;">${info.tag}</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-400">
+                        <span>Hits: <strong class="text-gray-200">${sent != null ? sent.toLocaleString() : '—'}</strong></span>
+                        <span>Tags Assigned: <strong class="text-emerald-400">${sent != null ? sent.toLocaleString() : '—'}</strong></span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${barW}%;background:${info.hex};"></div></div>
+                </div>`;
+            }).join('');
+        }
     }
-    // Registration/form summary table
-    const regTbody = document.getElementById('home-reg-table');
-    if (regTbody && Object.keys(regData).length) {
-        regTbody.innerHTML = Object.keys(regData).map(name => {
-            const cfg = regData[name];
-            const formSubs = gForms.filter(r => (r['Name']||'').toLowerCase().includes(name.toLowerCase().split(' ')[0].toLowerCase()));
-            const submissions = formSubs.length || 0;
-            const tag = cfg.tags[0] ? cfg.tags[0].tag : '—';
-            return `<tr class="hover:bg-gray-800/10 transition"><td class="py-2.5 font-medium orange-text">${name}</td><td class="text-center text-white font-semibold">${submissions || '-'}</td><td class="text-center"><span class="px-2 py-0.5 bg-gray-800 rounded text-gray-300 font-mono text-[10px]">${tag}</span></td><td class="text-center text-emerald-400 font-medium"><i class="fa-regular fa-circle-check mr-1"></i> Live</td></tr>`;
-        }).join('');
+
+    // Registration pipeline table — Sign Up "Email Sent Status" only
+    if (su) {
+        const regStatus = document.getElementById('reg-su-status');
+        if (regStatus) regStatus.innerHTML = '<i class="fa-regular fa-circle-check mr-1"></i> ' + su.sent.toLocaleString() + ' Sent';
     }
+
+    // Registration pipeline table — Submissions column from the uploaded Forms CSV (regData)
+    if (typeof regData !== 'undefined') {
+        const subMap = { 'Sign Up':'home-reg-sub-signup', 'Contact Us':'home-reg-sub-contactus', 'Chomp Show':'home-reg-sub-chomp', 'Jobs':'home-reg-sub-jobs', 'Job Applied':'home-reg-sub-jobapplied' };
+        Object.keys(subMap).forEach(cat => {
+            const val = regData[cat] ? regData[cat].submissions : null;
+            set(subMap[cat], val != null ? val : '-');
+        });
+        const anyUploaded = Object.values(regData).some(d => d.submissions != null);
+        const badge = document.getElementById('home-reg-source-badge');
+        if (badge) badge.textContent = anyUploaded ? 'From Forms CSV' : 'Upload Forms CSV';
+    }
+
+    // Newsletter summary widget — top 8 most recent campaigns from the uploaded Newsletter CSV
+    if (typeof nlWeeks !== 'undefined') {
+        const nlTbody = document.getElementById('home-nl-table');
+        if (nlTbody) {
+            if (nlWeeks.length) {
+                const top8 = nlWeeks.slice(0, 8);
+                nlTbody.innerHTML = top8.map(w =>
+                    `<tr class="orange-text"><td class="py-1.5 font-medium" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.label}</td><td class="text-center">${w.sent||'-'}</td><td class="text-center">${w.read||'-'}</td><td class="text-center">${w.clicked||'-'}</td></tr>`
+                ).join('');
+            } else {
+                nlTbody.innerHTML = '<tr><td colspan="4" class="py-3 text-center text-gray-600 text-xs">No newsletter data — upload Newsletter CSV</td></tr>';
+            }
+        }
+    }
+
+    // Email Nurturing summary widget — combined A+B numbers per email group
+    if (typeof nurturingData !== 'undefined') {
+        const nurtTbody = document.getElementById('home-nurture-table');
+        if (nurtTbody) {
+            if (nurturingData.length) {
+                nurtTbody.innerHTML = nurturingData.map(e => {
+                    const a = e.varA, b = e.varB;
+                    const s = (a?a.sent:0) + (b?b.sent:0);
+                    const r = (a?a.read:0) + (b?b.read:0);
+                    const c = (a?a.clicks:0) + (b?b.clicks:0);
+                    const bo = (a?a.bounced:0) + (b?b.bounced:0);
+                    const no = s - r;
+                    return `<tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">${cleanNurtureName(e.baseName)}</td><td>${s||'-'}</td><td>${r||'-'}</td><td>${pct(r,s)}</td><td>${c||'-'}</td><td>${pct(c,s)}</td><td>${no||'-'}</td><td>${pct(no,s)}</td></tr>`;
+                }).join('');
+            } else {
+                nurtTbody.innerHTML = '<tr><td colspan="8" class="py-3 text-center text-gray-600 text-xs">No nurture data — upload Nurture CSV</td></tr>';
+            }
+        }
+    }
+    // Home page Recipient Activity + Top Organisations — Sign Up recipients, from the
+    // master Recipients CSV.
+    const homeRecipients = (typeof recipientsByCategory !== 'undefined') ? (recipientsByCategory['Sign Up'] || []) : [];
+    const homeRecCountEl = document.getElementById('home-rec-count');
+    if (homeRecCountEl) homeRecCountEl.textContent = homeRecipients.length + ' contacts';
+    homeFiltered = homeRecipients.slice();
+    homePage = 1;
+    const hsrch = document.getElementById('homeSearchInput'); if (hsrch) hsrch.value = '';
+    renderHomeRecipientTable();
+    renderHomeOrgs(homeRecipients);
 }
-function showSignUp()   { showPage('page-signup','nav-signup');   setTimeout(()=>{renderSignupKPIs();drawDonut2();renderRecipients();renderOrgs();},50); }
+function pct(a,b){return b?((a/b)*100).toFixed(1)+'%':'0%';}
 
-// Fills every KPI card, funnel bar, and engagement number on the Sign Up page from live csvData (tag_emails sheet)
-function renderSignupKPIs() {
-    const s = rowStats(csvData);
-    const openRate  = pct(s.opened, s.sent);
-    const clickRate = pct(s.clicked, s.sent);
-    const cto       = pct(s.clicked, s.opened);
-    const bounceRate = pct(s.bounced, s.sent);
-    const notOpenPct = pct(s.notOpen, s.sent);
-    const openedNotClicked = s.opened - s.clicked;
+// ===== Home page Recipient Activity (Sign Up) =====
+let homeFiltered = [];
+let homePage = 1;
+const homePerPage = 12;
 
-    const subj = gTagEmails.find(r => {
-        const e = (r['Email address']||r['Contact Contact Primary Email']||'').toLowerCase();
-        return (categorySubjectMap['Sign Up']||[]).some(k => (r['Subject']||'').toLowerCase().includes(k));
+function filterHomeRecipients() {
+    const q = (document.getElementById('homeSearchInput').value || '').toLowerCase();
+    const f = document.getElementById('homeFilterSel') ? document.getElementById('homeFilterSel').value : 'all';
+    const base = (typeof recipientsByCategory !== 'undefined') ? (recipientsByCategory['Sign Up'] || []) : [];
+    homeFiltered = base.filter(r => {
+        const mq = r.email.toLowerCase().includes(q);
+        // Read/Clicked data isn't in the master Recipients CSV yet, so only "All"
+        // returns results for now; the other filters will work automatically once
+        // that data is wired in (r.read / r.clicked fields).
+        const mf = f === 'all' ? true
+                 : f === 'opened' ? r.read === 'Yes'
+                 : f === 'clicked' ? r.clicked === 'Yes'
+                 : r.read === 'No'; // not_opened
+        return mq && mf;
     });
-    const subjectLine = subj ? subj['Subject'] : '—';
-    const sentDate = subj ? (subj['Date sent']||'').split(' ')[0] : '—';
-
-    const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
-    set('su-subject', subjectLine);
-    set('su-date', sentDate);
-    set('su-sent', s.sent || 0);
-    set('su-opened', s.opened || 0);
-    set('su-openrate-sub', 'Open rate: ' + openRate);
-    set('su-clicked', s.clicked || 0);
-    set('su-clickrate-sub', 'Click rate: ' + clickRate);
-    set('su-cto', cto);
-    set('su-orgs', s.orgs || 0);
-    set('su-notopen', s.notOpen || 0);
-    set('su-notopen-sub', notOpenPct + ' of sent');
-    set('su-bounced', s.bounced || 0);
-    set('su-bounced-sub', bounceRate + ' bounce rate');
-    set('su-openrate', openRate);
-    set('su-contact-count', (s.sent||0) + ' contacts');
-
-    // Funnel
-    set('su-funnel-subject', subjectLine);
-    const fSent = document.getElementById('su-funnel-sent-bar');
-    if (fSent) { fSent.style.width='100%'; fSent.textContent = s.sent || 0; }
-    const fOpen = document.getElementById('su-funnel-open-bar');
-    if (fOpen) { fOpen.style.width = (s.sent ? (s.opened/s.sent*100) : 0) + '%'; fOpen.textContent = s.opened || 0; }
-    set('su-funnel-open-pct', openRate);
-    const fClick = document.getElementById('su-funnel-click-bar');
-    if (fClick) { fClick.style.width = (s.sent ? Math.max(s.clicked/s.sent*100, s.clicked?3:0) : 0) + '%'; fClick.textContent = s.clicked || 0; }
-    set('su-funnel-click-pct', clickRate);
-
-    // Engagement breakdown
-    set('su-eng-clicked', s.clicked || 0);
-    set('su-eng-openedonly', openedNotClicked || 0);
-    set('su-eng-notopened', s.notOpen || 0);
+    homePage = 1;
+    renderHomeRecipientTable();
 }
+
+function renderHomeRecipientTable() {
+    const tbody = document.getElementById('homeRecipientBody');
+    if (!tbody) return;
+    if (!homeFiltered.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found — upload the master Recipients CSV.</td></tr>';
+        const info = document.getElementById('homePageInfo');
+        if (info) info.textContent = 'No results';
+        return;
+    }
+    const start = (homePage-1)*homePerPage;
+    const rows = homeFiltered.slice(start, start+homePerPage);
+    tbody.innerHTML = rows.map(r => `
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':r.read==='No'?'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>':'<span class="text-gray-600">—</span>'}</td>
+        </tr>`).join('');
+    const total = homeFiltered.length;
+    const info = document.getElementById('homePageInfo');
+    if (info) info.textContent = total ? `${start+1}–${Math.min(start+homePerPage,total)} of ${total}` : 'No results';
+}
+function homePrevPage(){ if(homePage>1){homePage--;renderHomeRecipientTable();} }
+function homeNextPage(){ if(homePage<Math.ceil(homeFiltered.length/homePerPage)){homePage++;renderHomeRecipientTable();} }
+
+function renderHomeOrgs(rows) {
+    const container = document.getElementById('home-orgs-list');
+    if (!container) return;
+    if (!rows.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>';
+        return;
+    }
+    const domainCount = {};
+    rows.forEach(r => {
+        const d = r.email.split('@')[1];
+        if (d) domainCount[d] = (domainCount[d]||0) + 1;
+    });
+    const top = Object.entries(domainCount).sort((a,b)=>b[1]-a[1]).slice(0, 15);
+    if (!top.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No organisation data found.</p>';
+        return;
+    }
+    const colors = ["#60a5fa","#34d399","#f87171","#fbbf24","#a78bfa","#fb923c","#4ade80","#38bdf8","#f472b6","#818cf8","#22d3ee","#facc15","#a3e635","#e879f9","#fb7185"];
+    const maxCount = top[0][1];
+    container.innerHTML = top.map(([domain, count], i) => {
+        const w = Math.max(4, (count / maxCount) * 100);
+        return `<div class="flex items-center gap-3">
+            <span class="text-[11px] text-gray-300 truncate" style="width:130px; flex-shrink:0;">${domain}</span>
+            <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${w}%;background:${colors[i % colors.length]};"></div></div>
+            <span class="text-[11px] font-semibold text-gray-200" style="width:28px; text-align:right; flex-shrink:0;">${count}</span>
+        </div>`;
+    }).join('');
+}
+
+// showSignUp() is kept for backward-compat (in case anything still calls it) but now
+// redirects to the new "Sign Up" entry under Email By Category, since the old standalone
+// Sign Up page is no longer in the sidebar.
+function showSignUp() { showCategory('Sign Up'); }
 function showNurturing(){ showPage('page-nurturing','nav-nurturing'); renderNurturing(); }
 
 // ===== UNIFIED SIDEBAR ACCORDION (only one open at a time) =====
-const sidebarSections = ['emailcat', 'eventoccur', 'registration'];
+const sidebarSections = ['emailcat', 'registration']; // 'eventoccur' temporarily removed (commented out in sidebar above)
 let openSidebarSection = null;
 
 function toggleSidebarSection(section) {
@@ -1482,10 +1550,151 @@ function toggleSidebarSection(section) {
 
 // Category nav IDs map
 const catNavIds = {
-    'Sign Up':'nav-cat-signup','News':'nav-cat-news','Chomp Show':'nav-cat-chomp',
-    'Academy':'nav-cat-academy','Jobs':'nav-cat-jobs','Resources':'nav-cat-resources',
-    'Contact Us':'nav-cat-contactus','Benefits':'nav-cat-benefits'
+    'Sign Up':'nav-cat-signup', 'Follow Up Email':'nav-cat-followup', 'News':'nav-cat-news',
+    'Resources':'nav-cat-resources', 'Jobs':'nav-cat-jobs', 'Contact Us':'nav-cat-contactus',
+    'Chomp Show':'nav-cat-chomp', 'Blog':'nav-cat-blog', 'Academy':'nav-cat-academy',
+    'Form Submission Email':'nav-cat-formsub', 'Internal Email':'nav-cat-internal'
 };
+
+// Maps a category's display name to the exact "Name" value used in the
+// All-Engagement-Email-Report CSV (the pre-aggregated totals source).
+const categoryToEngagementName = {
+    'Sign Up':               'Gold Membership with Restaurant Association',
+    'Follow Up Email':       'Follow up - Gold Membership',
+    'News':                  'News with Restaurant Association',
+    'Resources':              'Resources with Restaurant Association',
+    'Jobs':                  'Jobs with Restaurant Association',
+    'Contact Us':            'Contact Us with Restaurant Association',
+    'Chomp Show':            'Chomp Show/Media with Restaurant Association',
+    'Blog':                  'Blogs/Topics with Restaurant Association',
+    'Academy':               'Academy/Training with Restaurant Association',
+    'Form Submission Email': 'Email - After Form Submission',
+    'Internal Email':        'Internal Email to Team'
+};
+// Order categories should appear in (home list + sidebar)
+const categoryOrder = ['Sign Up','Follow Up Email','News','Resources','Jobs','Contact Us','Chomp Show','Blog','Academy','Form Submission Email','Internal Email'];
+
+// Holds the parsed All-Engagement CSV totals, keyed by category display name.
+// Each value: {sent, read, clicked, bounced, unsubscribed} or null if not yet uploaded.
+let engagementData = {};
+// ===== ALL-ENGAGEMENT CSV (pre-aggregated totals per category) =====
+// Format: Name, Sent count, Read count, Read ratio, Unique clicks, Unique clicks ratio,
+//         Bounced, Bounced ratio, Unsubscribed, Unsubscribed ratio
+function parseEngagementCSV(text) {
+    const allRows = splitCSVRows(text.trim());
+    if (allRows.length < 2) return;
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+
+    const nameIdx   = headers.findIndex(h => h === 'name');
+    const sentIdx   = headers.findIndex(h => h === 'sent count');
+    const readIdx   = headers.findIndex(h => h === 'read count');
+    const clickIdx  = headers.findIndex(h => h === 'unique clicks');
+    const bounceIdx = headers.findIndex(h => h === 'bounced');
+    const unsubIdx  = headers.findIndex(h => h === 'unsubscribed');
+
+    // Build a reverse lookup: engagement CSV "Name" -> our category display name
+    const nameToCategory = {};
+    Object.keys(categoryToEngagementName).forEach(cat => {
+        nameToCategory[categoryToEngagementName[cat]] = cat;
+    });
+
+    for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
+        const rawName = (cols[nameIdx] || '').trim();
+        if (!rawName) continue;
+        const category = nameToCategory[rawName];
+        if (!category) continue; // unrecognized row, skip
+
+        engagementData[category] = {
+            sent: parseInt(cols[sentIdx], 10) || 0,
+            read: parseInt(cols[readIdx], 10) || 0,
+            clicked: parseInt(cols[clickIdx], 10) || 0,
+            bounced: parseInt(cols[bounceIdx], 10) || 0,
+            unsubscribed: parseInt(cols[unsubIdx], 10) || 0
+        };
+    }
+}
+
+function handleEngagementCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            parseEngagementCSV(e.target.result);
+            renderHome();
+            refreshCurrentPageAfterUpload();
+        } catch(err) {
+            console.error('All-Engagement CSV parse error:', err);
+        }
+    };
+    reader.readAsText(file);
+}
+
+// ===== MASTER PER-RECIPIENT CSV (Sent Email Recipients Report) =====
+// Format: Name (= category for Email-By-Category rows, OR a newsletter campaign name
+// for newsletter rows), Contact First Name, Contact Last Name,
+// Contact Contact Primary Email, Date sent.
+// No Read/Clicked/Bounced columns — this CSV only tells us WHO an email was sent to,
+// not whether they opened/clicked it.
+let recipientsByCategory = {};  // category display name -> [{email, sent}]
+let recipientsByNewsletter = {}; // newsletter campaign label (matches nlWeeks[i].label) -> [{email, sent}]
+
+function parseRecipientsCSV(text) {
+    const allRows = splitCSVRows(text.trim());
+    if (allRows.length < 2) { recipientsByCategory = {}; recipientsByNewsletter = {}; return; }
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+
+    const nameIdx  = headers.indexOf('name');
+    const emailIdx = headers.indexOf('contact contact primary email');
+    const sentIdx  = headers.indexOf('date sent');
+
+    const nameToCategory = {};
+    Object.keys(categoryToEngagementName).forEach(cat => {
+        nameToCategory[categoryToEngagementName[cat]] = cat;
+    });
+
+    const groupedCat = {};
+    const groupedNL = {};
+    for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
+        const rawName = (cols[nameIdx] || '').trim();
+        const email = (cols[emailIdx] || '').trim();
+        if (!rawName || !email) continue;
+        const sent = (cols[sentIdx] || '').trim();
+
+        const category = nameToCategory[rawName];
+        if (category) {
+            if (!groupedCat[category]) groupedCat[category] = [];
+            groupedCat[category].push({ email, sent });
+            continue;
+        }
+        // Not a known category — check if it's a newsletter campaign row instead.
+        if (/newsletter/i.test(rawName)) {
+            if (!groupedNL[rawName]) groupedNL[rawName] = [];
+            groupedNL[rawName].push({ email, sent });
+        }
+        // Otherwise unrecognized — skip.
+    }
+    recipientsByCategory = groupedCat;
+    recipientsByNewsletter = groupedNL;
+}
+
+function handleRecipientsCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            parseRecipientsCSV(e.target.result);
+            refreshCurrentPageAfterUpload();
+        } catch(err) {
+            console.error('Recipients CSV parse error:', err);
+        }
+    };
+    reader.readAsText(file);
+}
+
 let currentCategory = '';
 let catFiltered = [];
 let catPage = 1;
@@ -1502,16 +1711,18 @@ function showCategory(catName) {
     // keep emailcat parent highlighted
     document.getElementById('nav-emailcat').classList.add('active');
 
-    // Real data for every category, sourced from tag_emails Google Sheet tab
-    const data = categoryRows(catName);
-    const sent = data.length;
-    const opened = data.filter(r=>r.read==='Yes').length;
-    const clicked = data.filter(r=>r.clicked==='Yes').length;
-    const notOpened = data.filter(r=>r.read==='No').length;
+    // Totals come from the All-Engagement CSV (engagementData). Per-recipient detail
+    // (the table below) needs a separate master CSV that hasn't been uploaded yet —
+    // until then the table shows a clear "pending" state instead of fake/wrong data.
+    const eg = engagementData[catName] || null;
+    const sent = eg ? eg.sent : 0;
+    const opened = eg ? eg.read : 0;
+    const clicked = eg ? eg.clicked : 0;
+    const bounced = eg ? eg.bounced : 0;
+    const notOpened = sent - opened;
     const openRate = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
     const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
     const cto = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
-    const domains = sent ? [...new Set(data.map(r=>r.email.split('@')[1]).filter(Boolean))].length : '—';
     const openedNotClicked = opened - clicked;
 
     // Update title & badge
@@ -1519,44 +1730,45 @@ function showCategory(catName) {
     document.getElementById('cat-badge').textContent = 'Email By Category';
 
     // KPI cards
-    document.getElementById('cat-sent').textContent       = sent || '—';
-    document.getElementById('cat-opens').textContent      = opened || '—';
+    document.getElementById('cat-sent').textContent       = eg ? sent : '—';
+    document.getElementById('cat-opens').textContent      = eg ? opened : '—';
     document.getElementById('cat-open-rate').textContent  = 'Open rate: ' + openRate;
-    document.getElementById('cat-clicks').textContent     = clicked || '—';
+    document.getElementById('cat-clicks').textContent     = eg ? clicked : '—';
     document.getElementById('cat-click-rate').textContent = 'Click rate: ' + clickRate;
-    document.getElementById('cat-notopen').textContent    = notOpened || '—';
+    document.getElementById('cat-notopen').textContent    = eg ? notOpened : '—';
     document.getElementById('cat-notopen-pct').textContent= sent ? (notOpened/sent*100).toFixed(1)+'% of sent' : '— of sent';
     document.getElementById('cat-cto').textContent        = cto;
-    document.getElementById('cat-orgs').textContent       = domains;
+    document.getElementById('cat-orgs').textContent       = eg ? (bounced || 0) : '—'; // org-count slot repurposed; see note below
     document.getElementById('cat-avg-open').textContent   = openRate;
 
     // Funnel
     document.getElementById('cat-funnel-label').textContent   = catName + ' Campaign';
-    document.getElementById('cat-funnel-sent-bar').textContent = sent || '—';
+    document.getElementById('cat-funnel-sent-bar').textContent = eg ? sent : '—';
     const openW = sent ? Math.max(3, (opened/sent*100)) : 3;
     const clickW = sent ? Math.max(3, (clicked/sent*100)) : 3;
-    document.getElementById('cat-funnel-open-bar').textContent  = opened || '—';
+    document.getElementById('cat-funnel-open-bar').textContent  = eg ? opened : '—';
     document.getElementById('cat-funnel-open-bar').style.width  = openW + '%';
     document.getElementById('cat-funnel-open-pct').textContent  = openRate;
-    document.getElementById('cat-funnel-click-bar').textContent = clicked || '—';
+    document.getElementById('cat-funnel-click-bar').textContent = eg ? clicked : '—';
     document.getElementById('cat-funnel-click-bar').style.width = clickW + '%';
     document.getElementById('cat-funnel-click-pct').textContent = clickRate;
 
-    // Engagement
-    document.getElementById('cat-eg-clicked').textContent   = clicked || '—';
-    document.getElementById('cat-eg-opened').textContent    = openedNotClicked || '—';
-    document.getElementById('cat-eg-notopened').textContent = notOpened || '—';
-    document.getElementById('cat-recipient-count').textContent = sent + ' contacts';
-
-    // Donut
+    // Engagement donut
+    document.getElementById('cat-eg-clicked').textContent   = eg ? clicked : '—';
+    document.getElementById('cat-eg-opened').textContent    = eg ? openedNotClicked : '—';
+    document.getElementById('cat-eg-notopened').textContent = eg ? notOpened : '—';
     setTimeout(()=>drawCatDonut(clicked, openedNotClicked, notOpened, sent), 50);
 
-    // Table
-    catFiltered = [...data];
+    // Recipient table + Top Organisations: populated from the master Recipients CSV,
+    // grouped by category. "cat-recipient-count" reflects the actual recipient rows
+    // found for this category (may differ slightly from the engagement CSV's Sent
+    // count if the two exports were taken at different times).
+    const recipientRows = recipientsByCategory[catName] || [];
+    document.getElementById('cat-recipient-count').textContent = recipientRows.length + ' contacts';
     catPage = 1;
     if(document.getElementById('catSearchInput')) document.getElementById('catSearchInput').value='';
-    if(document.getElementById('catFilterSel')) document.getElementById('catFilterSel').value='all';
-    renderCatTable();
+    filterCatRecipients();
+    renderCatOrgs(catName);
 }
 
 function drawCatDonut(clicked, openedNot, notOpened, total) {
@@ -1579,12 +1791,15 @@ function drawCatDonut(clicked, openedNot, notOpened, total) {
 }
 
 function filterCatRecipients() {
-    const q = document.getElementById('catSearchInput').value.toLowerCase();
-    const f = document.getElementById('catFilterSel').value;
-    const base = categoryRows(currentCategory);
+    const q = (document.getElementById('catSearchInput').value || '').toLowerCase();
+    const f = document.getElementById('catFilterSel') ? document.getElementById('catFilterSel').value : 'all';
+    const base = recipientsByCategory[currentCategory] || [];
     catFiltered = base.filter(r => {
         const mq = r.email.toLowerCase().includes(q);
-        const mf = f==='all'?true: f==='clicked'?r.clicked==='Yes': f==='opened'?r.read==='Yes': r.read==='No';
+        const mf = f === 'all' ? true
+                 : f === 'opened' ? r.read === 'Yes'
+                 : f === 'clicked' ? r.clicked === 'Yes'
+                 : r.read === 'No';
         return mq && mf;
     });
     catPage = 1;
@@ -1592,14 +1807,19 @@ function filterCatRecipients() {
 }
 
 function renderCatTable() {
+    if (!catFiltered.length) {
+        document.getElementById('catRecipientBody').innerHTML =
+            '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found — upload the master Recipients CSV, or no match for this category.</td></tr>';
+        document.getElementById('catPageInfo').textContent = 'No results';
+        return;
+    }
     const start = (catPage-1)*catPerPage;
     const rows = catFiltered.slice(start, start+catPerPage);
     document.getElementById('catRecipientBody').innerHTML = rows.map(r=>`
         <tr class="hover:bg-gray-800/20 transition">
-            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
             <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
-            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
-            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':r.read==='No'?'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>':'<span class="text-gray-600">—</span>'}</td>
         </tr>`).join('');
     const total = catFiltered.length;
     document.getElementById('catPageInfo').textContent = total ? `${start+1}–${Math.min(start+catPerPage,total)} of ${total}` : 'No results';
@@ -1607,65 +1827,45 @@ function renderCatTable() {
 function catPrevPage(){ if(catPage>1){catPage--;renderCatTable();} }
 function catNextPage(){ if(catPage<Math.ceil(catFiltered.length/catPerPage)){catPage++;renderCatTable();} }
 
-// ===== DATA (populated from Google Sheets) =====
-let csvData = [];
-let orgData = [];
+// Renders the Top Organisations chart for the currently open category, derived from
+// the master Recipients CSV's email domains.
+function renderCatOrgs(catName) {
+    const container = document.getElementById('cat-orgs-list');
+    if (!container) return;
+    const rows = recipientsByCategory[catName] || [];
+    if (!rows.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>';
+        return;
+    }
+    const domainCount = {};
+    rows.forEach(r => {
+        const d = r.email.split('@')[1];
+        if (d) domainCount[d] = (domainCount[d]||0) + 1;
+    });
+    const top = Object.entries(domainCount).sort((a,b)=>b[1]-a[1]).slice(0, 15);
+    if (!top.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No organisation data found.</p>';
+        return;
+    }
+    const colors = ["#60a5fa","#34d399","#f87171","#fbbf24","#a78bfa","#fb923c","#4ade80","#38bdf8","#f472b6","#818cf8","#22d3ee","#facc15","#a3e635","#e879f9","#fb7185"];
+    const maxCount = top[0][1];
+    container.innerHTML = top.map(([domain, count], i) => {
+        const w = Math.max(4, (count / maxCount) * 100);
+        return `<div class="flex items-center gap-3">
+            <span class="text-[11px] text-gray-300 truncate" style="width:130px; flex-shrink:0;">${domain}</span>
+            <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${w}%;background:${colors[i % colors.length]};"></div></div>
+            <span class="text-[11px] font-semibold text-gray-200" style="width:28px; text-align:right; flex-shrink:0;">${count}</span>
+        </div>`;
+    }).join('');
+}
+
+
+// ===== DATA =====
+const csvData = []
+
+const orgData = []
 const orgColors = ["#60a5fa","#34d399","#f87171","#fbbf24","#a78bfa","#fb923c","#4ade80","#38bdf8","#f472b6","#818cf8"];
 const hourlyData = {}
-
-// Maps "Category" / "Sign Up" page name -> keyword(s) to match in tag_emails Subject column.
-// Edit these keywords if your Mautic Subject lines use different wording.
-const categorySubjectMap = {
-    'Sign Up':     ['gold membership','exclusive access'],
-    'News':        ['news'],
-    'Chomp Show':  ['chomp show'],
-    'Academy':     ['academy'],
-    'Jobs':        ['jobs'],
-    'Resources':   ['resources'],
-    'Contact Us':  ['contact us'],
-    'Benefits':    ['benefits']
-};
-
-// Convert a raw tag_emails (or newsletter) sheet row into the {email,sent,read,clicked} shape
-// used throughout the existing render functions.
-function toRecipientRow(r) {
-    const sentRaw = r['Date sent'] || '';
-    let timeStr = sentRaw;
-    try { const d = new Date(sentRaw); if(!isNaN(d)) timeStr = d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}); } catch(e){}
-    return {
-        email: r['Email address'] || r['Contact Contact Primary Email'] || '',
-        sent: timeStr,
-        sentRaw: sentRaw,
-        // "Date read" has a value only if the recipient actually opened the email.
-        // The "Read" column itself is always "Yes" in the source sheet, so it's not used here.
-        read: (r['Date read']||'').trim() !== '' ? 'Yes':'No',
-        clicked: (r['Clicked']||'').toLowerCase()==='yes' ? 'Yes':'No'
-    };
-}
-
-// Returns recipient rows (in csvData shape) for a given category name, sourced from tag_emails sheet.
-function categoryRows(catName) {
-    const keywords = categorySubjectMap[catName] || [catName.toLowerCase()];
-    return gTagEmails
-        .filter(r => {
-            const subj = (r['Subject']||'').toLowerCase();
-            return keywords.some(k => subj.includes(k));
-        })
-        .filter(r => r['Email address'] || r['Contact Contact Primary Email'])
-        .map(toRecipientRow);
-}
-
-function rebuildOrgData(rows) {
-    const domainCount = {};
-    rows.forEach(r => { const d=r.email.split('@')[1]; if(d) domainCount[d]=(domainCount[d]||0)+1; });
-    return Object.entries(domainCount).sort((a,b)=>b[1]-a[1]).slice(0,15);
-}
-
-// Called after Google Sheet data loads: populate csvData with the "Sign Up" category (home/signup page default)
-function rebuildCoreData() {
-    csvData = categoryRows('Sign Up');
-    orgData = rebuildOrgData(csvData);
-}
 
 // ===== RECIPIENT TABLE =====
 let currentPage = 1;
@@ -1755,54 +1955,154 @@ function drawDonut2() {
 }
 
 // ===== EMAIL NURTURING BREAKDOWN =====
-const nurturingData = [
-    {id:'Email 001', varA:{name:'25200-00001 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00001 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 002', varA:{name:'25200-00002 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00002 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 003', varA:{name:'25200-00003 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00003 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 004', varA:{name:'25200-00004 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00004 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 005', varA:{name:'25200-00005 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00005 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 006', varA:{name:'25200-00006 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00006 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 007', varA:{name:'25200-00007 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00007 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 008', varA:{name:'25200-00008 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00008 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 009', varA:{name:'25200-00009 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00009 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 010', varA:{name:'25200-00010 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00010 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 011', varA:{name:'25200-00011 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00011 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 012', varA:{name:'25200-00012 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00012 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 013', varA:{name:'25200-00013 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00013 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-    {id:'Email 014', varA:{name:'25200-00014 | Nurturing | Email A', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'},
-                     varB:{name:'25200-00014 | Nurturing | Email B', sent:0, read:0, readPct:'—', clicks:0, clickPct:'—', notOpen:0, notOpenPct:'—'}},
-];
+// ===== EMAIL NURTURING DATA (built dynamically from uploaded Nurture CSV) =====
+// The Nurture CSV is pre-aggregated (one row per A/B variant, already summed by Mautic),
+// unlike tag_emails which is one row per recipient. So we parse it directly into
+// sent/read/clicks rather than computing from individual rows.
+let nurturingData = [];
+
+function handleNurtureCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            parseNurtureCSV(e.target.result);
+            renderNurturing();
+        } catch(err) {
+            console.error('Nurture CSV parse error:', err);
+        }
+    };
+    reader.readAsText(file);
+}
+
+// Extracts the email group number ("001") and variant letter ("A"/"B") from a name like
+// "RA - Welcome Email - 001 A". Falls back gracefully if the naming pattern differs.
+function parseNurtureName(name) {
+    const variantMatch = name.trim().match(/\s([A-Z])$/); // trailing " A" or " B"
+    const variant = variantMatch ? variantMatch[1] : 'A';
+    const baseName = variantMatch ? name.trim().slice(0, -2).trim() : name.trim();
+    const numMatch = baseName.match(/(\d{3,})/); // e.g. "001"
+    const groupId = numMatch ? numMatch[1] : baseName;
+    return { groupId, baseName, variant };
+}
+
+function parseNurtureCSV(text) {
+    const allRows = splitCSVRows(text.trim());
+    if (allRows.length < 2) { nurturingData = []; return; }
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+
+    const nameIdx    = headers.findIndex(h => h === 'name');
+    const sentIdx    = headers.findIndex(h => h === 'sent count');
+    const readIdx    = headers.findIndex(h => h === 'read count');
+    const readPctIdx = headers.findIndex(h => h === 'read ratio');
+    const clickIdx   = headers.findIndex(h => h === 'unique clicks');
+    const clickPctIdx= headers.findIndex(h => h.includes('clicks ratio'));
+    const bounceIdx  = headers.findIndex(h => h === 'bounced');
+    const bouncePctIdx = headers.findIndex(h => h.includes('bounced ratio'));
+
+    const groups = {}; // groupId -> { id, varA, varB }
+    for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
+        const rawName = (cols[nameIdx] || '').trim();
+        if (!rawName) continue;
+        const { groupId, baseName, variant } = parseNurtureName(rawName);
+
+        const sent  = parseInt(cols[sentIdx], 10) || 0;
+        const read  = parseInt(cols[readIdx], 10) || 0;
+        const clicks= parseInt(cols[clickIdx], 10) || 0;
+        const notOpen = sent - read;
+
+        const variantObj = {
+            name: rawName,
+            sent: sent,
+            read: read,
+            readPct: cols[readPctIdx] || (sent ? (read/sent*100).toFixed(1)+'%' : '—'),
+            clicks: clicks,
+            clickPct: cols[clickPctIdx] || (sent ? (clicks/sent*100).toFixed(1)+'%' : '—'),
+            notOpen: notOpen,
+            notOpenPct: sent ? (notOpen/sent*100).toFixed(1)+'%' : '—',
+            bounced: parseInt(cols[bounceIdx], 10) || 0,
+            bouncedPct: cols[bouncePctIdx] || '0.00%'
+        };
+
+        if (!groups[groupId]) groups[groupId] = { id: 'Email ' + groupId, baseName, varA: null, varB: null };
+        if (variant === 'A') groups[groupId].varA = variantObj;
+        else groups[groupId].varB = variantObj;
+    }
+
+    // Sort by groupId so Email 001, 002, 003... appear in order
+    nurturingData = Object.keys(groups).sort().map(k => groups[k]);
+}
+
+// Strips the trailing campaign number (e.g. "- 001") from a nurture base name,
+// turning "RA - Welcome Email - 001" into "RA Welcome Email".
+function cleanNurtureName(baseName) {
+    if (!baseName) return 'Nurture Email';
+    return baseName
+        .replace(/-\s*\d+\s*$/, '')   // strip trailing "- 001"
+        .replace(/-/g, ' ')            // remaining dashes -> spaces
+        .replace(/\s+/g, ' ')          // collapse multiple spaces
+        .trim();
+}
 
 function renderNurturing() {
+    const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
+    const countEl = document.getElementById('nurture-email-count');
+    if (countEl) countEl.textContent = nurturingData.length + (nurturingData.length===1?' Email':' Emails');
+
+    // Aggregate top KPI cards across all email groups and both variants
+    let totalSent=0, totalRead=0, totalClicks=0, totalBounced=0, variantCount=0;
+    nurturingData.forEach(e => {
+        [e.varA, e.varB].forEach(v => {
+            if (!v) return;
+            variantCount++;
+            totalSent += v.sent;
+            totalRead += v.read;
+            totalClicks += v.clicks;
+            totalBounced += v.bounced;
+        });
+    });
+    const totalNotOpen = totalSent - totalRead;
+    if (totalSent > 0) {
+        set('nurture-sent', totalSent.toLocaleString());
+        set('nurture-opens', totalRead.toLocaleString());
+        set('nurture-clicks', totalClicks.toLocaleString());
+        set('nurture-notopen', totalNotOpen.toLocaleString());
+        set('nurture-bounced', totalBounced.toLocaleString());
+        set('nurture-openrate', pct(totalRead, totalSent));
+        set('nurture-clickrate', pct(totalClicks, totalSent));
+        set('nurture-variants', variantCount);
+    }
+
     const container = document.getElementById('nurturingEmails');
     if(!container) return;
-    container.innerHTML = nurturingData.map(e => `
+    if (!nurturingData.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-10">No nurture data yet — upload the Nurture CSV above.</p>';
+        return;
+    }
+    container.innerHTML = nurturingData.map(e => {
+        // Combined (A+B) numbers for the card header — this is the "main view" summary
+        const a = e.varA, b = e.varB;
+        const combinedSent = (a?a.sent:0) + (b?b.sent:0);
+        const combinedRead = (a?a.read:0) + (b?b.read:0);
+        const combinedClicks = (a?a.clicks:0) + (b?b.clicks:0);
+        const combinedOpenRate = pct(combinedRead, combinedSent);
+        const combinedClickRate = pct(combinedClicks, combinedSent);
+        return `
         <div class="card-bg rounded-xl overflow-hidden">
-            <!-- Email header -->
+            <!-- Email header: COMBINED A+B numbers (main view) -->
             <div class="flex items-center justify-between px-5 py-3" style="background:#1e2130; border-bottom:1px solid rgba(255,255,255,0.06);">
-                <span class="text-sm font-bold" style="color:#60a5fa;">${e.id}</span>
+                <span class="text-sm font-bold" style="color:#60a5fa;">${cleanNurtureName(e.baseName)}</span>
                 <div class="flex items-center gap-6 text-xs text-gray-400">
-                    <span>Sent: <strong class="text-white">${e.varA.sent + e.varB.sent || '—'}</strong></span>
-                    <span>Opens: <strong class="text-white">${e.varA.read + e.varB.read || '—'}</strong></span>
-                    <span>Clicks: <strong class="text-white">${e.varA.clicks + e.varB.clicks || '—'}</strong></span>
-                    <span>Open Rate: <strong class="text-[#e8533a]">—</strong></span>
-                    <span>Click Rate: <strong class="text-[#e8533a]">—</strong></span>
+                    <span>Sent: <strong class="text-white">${combinedSent || '—'}</strong></span>
+                    <span>Opens: <strong class="text-white">${combinedRead || '—'}</strong></span>
+                    <span>Clicks: <strong class="text-white">${combinedClicks || '—'}</strong></span>
+                    <span>Open Rate: <strong class="text-[#e8533a]">${combinedOpenRate}</strong></span>
+                    <span>Click Rate: <strong class="text-[#e8533a]">${combinedClickRate}</strong></span>
                 </div>
             </div>
-            <!-- Table -->
+            <!-- Table: A and B shown SEPARATELY (detail view) -->
             <table class="w-full text-[11px] text-left">
                 <thead>
                     <tr class="text-gray-500 border-b border-gray-800/60" style="background:#161920;">
@@ -1818,12 +2118,13 @@ function renderNurturing() {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-800/30">
-                    ${varRow('A', e.varA)}
-                    ${varRow('B', e.varB)}
+                    ${a ? varRow('A', a) : ''}
+                    ${b ? varRow('B', b) : ''}
                 </tbody>
             </table>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function varRow(label, v) {
@@ -1854,46 +2155,102 @@ function varRow(label, v) {
 
 // ===== SHOW REGISTRATION =====
 // ===== REGISTRATION DATA =====
+// NOTE: "submissions" (form fills) and tag "tagged" counts come from the forms/contacts
+// CSVs, NOT from tag_emails — they stay null until those data sources are wired in.
+// "emailSent" is also removed as a hardcoded fallback; the real Sign Up email count
+// comes live from the uploaded tag_emails CSV (csvData) inside showRegistration().
 const regData = {
     'Sign Up': {
-        submissions: 1240,
+        submissions: null,
         tags: [
-            { tag:'Sign_Up',              color:'#e8533a', trigger:'Sign Up form submission',  tagged:1240 },
-            { tag:'Pending_verification', color:'#60a5fa', trigger:'Auto-assigned on Sign Up', tagged:1240 }
-        ],
-        emailSent: 271
+            { tag:'Sign_Up',              color:'#e8533a', trigger:'Sign Up form submission',  tagged:null },
+            { tag:'Pending_verification', color:'#60a5fa', trigger:'Auto-assigned on Sign Up', tagged:null }
+        ]
     },
     'Jobs': {
-        submissions: 390,
-        tags: [{ tag:'interest_jobs', color:'#10b981', trigger:'Jobs form submission', tagged:390 }],
-        emailSent: 0
+        submissions: null,
+        tags: [{ tag:'interest_jobs', color:'#10b981', trigger:'Job Post form submission', tagged:null }]
+    },
+    'Job Applied': {
+        submissions: null,
+        tags: [{ tag:'job_applied', color:'#34d399', trigger:'Job Applied form submission', tagged:null }]
     },
     'Chomp Show': {
-        submissions: 450,
-        tags: [{ tag:'requested_chomp_show', color:'#a78bfa', trigger:'Chomp Show form submission', tagged:450 }],
-        emailSent: 0
-    },
-    'Benefits': {
-        submissions: 510,
-        tags: [{ tag:'req_benefits', color:'#fbbf24', trigger:'Benefits form submission', tagged:510 }],
-        emailSent: 0
+        submissions: null,
+        tags: [{ tag:'requested_chomp_show', color:'#a78bfa', trigger:'Chomp Show / Benefit form submission', tagged:null }]
     },
     'Contact Us': {
-        submissions: 320,
-        tags: [{ tag:'intent_contact', color:'#f472b6', trigger:'Contact Us form submission', tagged:320 }],
-        emailSent: 0
+        submissions: null,
+        tags: [{ tag:'intent_contact', color:'#f472b6', trigger:'Contact Us form submission', tagged:null }]
     }
 };
 
 const regNavIds = {
     'Sign Up':'nav-reg-signup','Contact Us':'nav-reg-contact',
-    'Chomp Show':'nav-reg-chomp','Benefits':'nav-reg-benefits','Jobs':'nav-reg-jobs'
+    'Chomp Show':'nav-reg-chomp','Jobs':'nav-reg-jobs','Job Applied':'nav-reg-jobapplied'
 };
 
-let currentRegName = '';
+// Maps a raw "Name" value from the Forms CSV to one of our regData categories.
+// "Job Post" and "Job Applied" are kept as SEPARATE categories (not combined),
+// per request — they're different funnel stages (posting interest vs. applying).
+function mapFormNameToCategory(rawName) {
+    const n = (rawName || '').toLowerCase();
+    if (n.includes('signup') || n.includes('sign up') || n.includes('gold membership')) return 'Sign Up';
+    if (n.includes('contact us') || n.includes('contact_us')) return 'Contact Us';
+    if (n.includes('chomp show') || n.includes('benefit')) return 'Chomp Show'; // covers "Chomp Show Request_Benefit"
+    if (n.includes('job applied')) return 'Job Applied';
+    if (n.includes('job post') || n.includes('job')) return 'Jobs';
+    return null; // unrecognized form name — not counted
+}
+
+function handleFormsCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            parseFormsCSV(e.target.result);
+            renderHome(); // updates home page registration table submission counts
+            // Re-render whichever registration category is currently open
+            const activePage = document.querySelector('[id^="page-"].visible');
+            if (activePage && activePage.id === 'page-registration') {
+                const activeNav = Object.keys(regNavIds).find(k => {
+                    const el = document.getElementById(regNavIds[k]);
+                    return el && el.classList.contains('active');
+                });
+                if (activeNav) showRegistration(activeNav);
+            }
+        } catch(err) {
+            console.error('Forms CSV parse error:', err);
+        }
+    };
+    reader.readAsText(file);
+}
+
+function parseFormsCSV(text) {
+    const allRows = splitCSVRows(text.trim());
+    if (allRows.length < 2) return;
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+    const nameIdx = headers.findIndex(h => h === 'name');
+    if (nameIdx === -1) return;
+
+    // Reset all submission counts to 0 before recounting
+    Object.keys(regData).forEach(k => { regData[k].submissions = 0; });
+
+    for (let i = 1; i < allRows.length; i++) {
+        const rawName = (allRows[i][nameIdx] || '').trim();
+        if (!rawName) continue;
+        const category = mapFormNameToCategory(rawName);
+        if (category && regData[category]) {
+            regData[category].submissions += 1;
+        }
+    }
+}
+
 let regFiltered = [];
 let regPage = 1;
 const regPerPage = 12;
+let currentRegName = '';
 
 function showRegistration(name) {
     currentRegName = name;
@@ -1903,16 +2260,16 @@ function showRegistration(name) {
     showPage('page-registration', null);
     document.getElementById('nav-registration').classList.add('active');
 
-    // Tags + base info still come from regData config (trigger labels/colors), but submissions count
-    // and email stats now come from live Google Sheets data.
-    const cfg = regData[name] || { tags:[] };
-    const formSubs = gForms.filter(r => (r['Name']||'').toLowerCase().includes(name.toLowerCase().split(' ')[0].toLowerCase()));
-    const submissions = formSubs.length || cfg.submissions || 0;
-    const emailData = categoryRows(name);
-    const sent     = emailData.length;
-    const opened   = emailData.filter(r=>r.read==='Yes').length;
-    const clicked  = emailData.filter(r=>r.clicked==='Yes').length;
-    const notOpen  = emailData.filter(r=>r.read==='No').length;
+    const d = regData[name] || { submissions:0, tags:[] };
+    // Email engagement stats (Sent/Opened/Clicked) come from the same All-Engagement
+    // category totals shown under Email By Category, where a matching category exists.
+    // "Jobs" and "Job Applied" registration forms don't have a 1:1 matching engagement
+    // category (the engagement CSV only has one combined "Jobs" email), so they show "—".
+    const eg = engagementData[name] || null;
+    const sent     = eg ? eg.sent : 0;
+    const opened   = eg ? eg.read : 0;
+    const clicked  = eg ? eg.clicked : 0;
+    const notOpen  = eg ? (eg.sent - eg.read) : 0;
     const openRate  = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
     const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
     const cto       = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
@@ -1923,70 +2280,82 @@ function showRegistration(name) {
     document.getElementById('reg-badge').textContent = name;
 
     // KPI cards
-    document.getElementById('reg-submissions').textContent = submissions || '—';
-    document.getElementById('reg-tags-count').textContent  = cfg.tags.reduce((a,t)=>a+t.tagged,0) || '—';
-    document.getElementById('reg-email-sent').textContent  = sent || '—';
-    document.getElementById('reg-opened').textContent      = opened || '—';
+    // "Tags Assigned" = Submissions count: every form submission triggers exactly one
+    // tag assignment in Mautic, so the two numbers are always equal.
+    document.getElementById('reg-submissions').textContent = d.submissions != null ? d.submissions : '—';
+    document.getElementById('reg-tags-count').textContent  = d.submissions != null ? d.submissions : '—';
+    document.getElementById('reg-email-sent').textContent  = eg ? sent : '—';
+    document.getElementById('reg-opened').textContent      = eg ? opened : '—';
     document.getElementById('reg-open-rate').textContent   = 'Open rate: ' + openRate;
-    document.getElementById('reg-clicked').textContent     = clicked || '—';
+    document.getElementById('reg-clicked').textContent     = eg ? clicked : '—';
     document.getElementById('reg-click-rate').textContent  = 'Click rate: ' + clickRate;
-    document.getElementById('reg-notopen').textContent     = notOpen || '—';
+    document.getElementById('reg-notopen').textContent     = eg ? notOpen : '—';
     document.getElementById('reg-notopen-pct').textContent = notOpenPct + ' of sent';
     document.getElementById('reg-cto').textContent         = cto;
 
-    // Assigned Tags cards
-    document.getElementById('reg-tag-cards').innerHTML = cfg.tags.map(t=>`
+    // Assigned Tags cards — each tag's "assigned to" count equals total submissions,
+    // since every submission triggers all of that form's tags together.
+    document.getElementById('reg-tag-cards').innerHTML = d.tags.map(t=>`
         <div class="p-4 rounded-xl" style="background:#161920;border:1.5px solid ${t.color}33;">
             <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-2">Tag Name</p>
             <span class="font-mono text-sm font-bold px-3 py-1 rounded-lg" style="color:${t.color};background:${t.color}18;border:1px solid ${t.color}33;">${t.tag}</span>
             <p class="text-[10px] text-gray-400 mt-2">${t.trigger}</p>
-            <p class="text-[10px] text-gray-500 mt-1">Assigned to: <strong class="text-white">${t.tagged}</strong> contacts</p>
+            <p class="text-[10px] text-gray-500 mt-1">Assigned to: <strong class="text-white">${d.submissions != null ? d.submissions : '—'}</strong> contacts</p>
         </div>`).join('');
 
     // Funnel
     document.getElementById('reg-funnel-label').textContent = name + ' Campaign';
-    document.getElementById('reg-f-sent-bar').textContent   = sent || '—';
+    document.getElementById('reg-f-sent-bar').textContent   = eg ? sent : '—';
     const openW  = sent ? Math.max(3,(opened/sent*100)) : 3;
     const clickW = sent ? Math.max(3,(clicked/sent*100)) : 3;
-    document.getElementById('reg-f-open-bar').textContent   = opened || '—';
+    document.getElementById('reg-f-open-bar').textContent   = eg ? opened : '—';
     document.getElementById('reg-f-open-bar').style.width   = openW + '%';
     document.getElementById('reg-f-open-pct').textContent   = openRate;
-    document.getElementById('reg-f-click-bar').textContent  = clicked || '—';
+    document.getElementById('reg-f-click-bar').textContent  = eg ? clicked : '—';
     document.getElementById('reg-f-click-bar').style.width  = clickW + '%';
     document.getElementById('reg-f-click-pct').textContent  = clickRate;
 
-    // Recipients
-    document.getElementById('reg-rec-count').textContent = (sent||0) + ' contacts';
-    regFiltered = [...emailData];
+    // Recipients — from the master Recipients CSV, grouped by category. "Job Applied"
+    // has no matching campaign in that CSV (it's a Forms-only concept), so it will
+    // correctly show "0 contacts" rather than reusing the "Jobs" recipient list.
+    const recipientRows = recipientsByCategory[name] || [];
+    document.getElementById('reg-rec-count').textContent = recipientRows.length + ' contacts';
     regPage = 1;
     const srch=document.getElementById('regSearchInput'); if(srch) srch.value='';
-    const fsel=document.getElementById('regFilterSel');   if(fsel) fsel.value='all';
-    renderRegTable();
+    filterRegRecipients();
 }
 
 function filterRegRecipients() {
-    const q=document.getElementById('regSearchInput').value.toLowerCase();
-    const f=document.getElementById('regFilterSel').value;
-    const base = categoryRows(currentRegName || 'Sign Up');
-    regFiltered=base.filter(r=>{
-        const mq=r.email.toLowerCase().includes(q);
-        const mf=f==='all'?true:f==='clicked'?r.clicked==='Yes':f==='opened'?r.read==='Yes':r.read==='No';
-        return mq&&mf;
+    const q = (document.getElementById('regSearchInput').value || '').toLowerCase();
+    const f = document.getElementById('regFilterSel') ? document.getElementById('regFilterSel').value : 'all';
+    const base = recipientsByCategory[currentRegName] || [];
+    regFiltered = base.filter(r => {
+        const mq = r.email.toLowerCase().includes(q);
+        const mf = f === 'all' ? true
+                 : f === 'opened' ? r.read === 'Yes'
+                 : f === 'clicked' ? r.clicked === 'Yes'
+                 : r.read === 'No';
+        return mq && mf;
     });
     regPage=1; renderRegTable();
 }
 
 function renderRegTable() {
-    const start=(regPage-1)*regPerPage;
-    const rows=regFiltered.slice(start,start+regPerPage);
     const tbody=document.getElementById('regRecipientBody');
     if(!tbody) return;
+    if (!regFiltered.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found for this form.</td></tr>';
+        const info=document.getElementById('regPageInfo');
+        if(info) info.textContent='No results';
+        return;
+    }
+    const start=(regPage-1)*regPerPage;
+    const rows=regFiltered.slice(start,start+regPerPage);
     tbody.innerHTML=rows.map(r=>`
         <tr class="hover:bg-gray-800/20 transition">
-            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
             <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
-            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
-            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':r.read==='No'?'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>':'<span class="text-gray-600">—</span>'}</td>
         </tr>`).join('');
     const total=regFiltered.length;
     const info=document.getElementById('regPageInfo');
@@ -1996,15 +2365,18 @@ function regPrevPage(){ if(regPage>1){regPage--;renderRegTable();} }
 function regNextPage(){ if(regPage<Math.ceil(regFiltered.length/regPerPage)){regPage++;renderRegTable();} }
 
 // ===== EVENT OCCUR DATA =====
+// NOTE: "hits" (page visits) and "tagged" (unique users tagged) come from Mautic's
+// page-hit/contact-tag tracking, NOT from the tag_emails CSV. Until that data source
+// (e.g. the contacts CSV) is wired in, these stay null and the UI shows "—".
 const eoTagMap = {
-    'Sign Up':     { tag:'Sign_Up',            event:'Sign Up form submission',       hits:1240, tagged:892  },
-    'News':        { tag:'interest_news',       event:'News page visit',               hits:620,  tagged:415  },
-    'Blog':        { tag:'interest_topics',     event:'Blog post visit',               hits:840,  tagged:510  },
-    'Chomp Show':  { tag:'interest_chomp_show', event:'Chomp Show page visit',         hits:450,  tagged:280  },
-    'Academy':     { tag:'interest_training',   event:'Academy page visit',            hits:540,  tagged:390  },
-    'Jobs':        { tag:'interest_jobs',       event:'Jobs page visit',               hits:480,  tagged:310  },
-    'Contact Us':  { tag:'intent_contact',      event:'Contact Us form submission',    hits:320,  tagged:220  },
-    'Benefits':    { tag:'req_benefits',        event:'Benefits page visit/request',   hits:510,  tagged:360  },
+    'Sign Up':     { tag:'Sign_Up',            event:'Sign Up form submission',       hits:null, tagged:null },
+    'News':        { tag:'interest_news',       event:'News page visit',               hits:null, tagged:null },
+    'Blog':        { tag:'interest_topics',     event:'Blog post visit',               hits:null, tagged:null },
+    'Chomp Show':  { tag:'interest_chomp_show', event:'Chomp Show page visit',         hits:null, tagged:null },
+    'Academy':     { tag:'interest_training',   event:'Academy page visit',            hits:null, tagged:null },
+    'Jobs':        { tag:'interest_jobs',       event:'Jobs page visit',               hits:null, tagged:null },
+    'Contact Us':  { tag:'intent_contact',      event:'Contact Us form submission',    hits:null, tagged:null },
+    'Benefits':    { tag:'req_benefits',        event:'Benefits page visit/request',   hits:null, tagged:null },
 };
 
 const eoNavIds = {
@@ -2013,14 +2385,12 @@ const eoNavIds = {
     'Contact Us':'nav-eo-contact','Benefits':'nav-eo-benefits'
 };
 
-let currentEOName='', currentEOTag='', currentEOColor='';
 let eoFiltered = [];
 let eoPage = 1;
 const eoPerPage = 12;
 let currentEOTab = 'analytics';
 
 function showEventOccur(name, tag, color) {
-    currentEOName = name; currentEOTag = tag; currentEOColor = color;
     Object.values(eoNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
     const navEl = document.getElementById(eoNavIds[name]);
     if(navEl) navEl.classList.add('active');
@@ -2028,7 +2398,7 @@ function showEventOccur(name, tag, color) {
     document.getElementById('nav-eventoccur').classList.add('active');
 
     const d = eoTagMap[name] || { tag: tag, event:'—', hits:0, tagged:0 };
-    const emailData = categoryRows(name);
+    const emailData = name === 'Sign Up' ? csvData : [];
     const sent     = emailData.length;
     const opened   = emailData.filter(r=>r.read==='Yes').length;
     const clicked  = emailData.filter(r=>r.clicked==='Yes').length;
@@ -2087,7 +2457,7 @@ function showEventOccur(name, tag, color) {
 function filterEORecipients() {
     const q = document.getElementById('eoSearchInput').value.toLowerCase();
     const f = document.getElementById('eoFilterSel').value;
-    eoFiltered = categoryRows(currentEOName || 'Sign Up').filter(r => {
+    eoFiltered = csvData.filter(r => {
         const mq = r.email.toLowerCase().includes(q);
         const mf = f==='all'?true: f==='clicked'?r.clicked==='Yes': f==='opened'?r.read==='Yes': r.read==='No';
         return mq && mf;
@@ -2116,34 +2486,69 @@ function eoPrevPage(){ if(eoPage>1){eoPage--;renderEOTable();} }
 function eoNextPage(){ if(eoPage<Math.ceil(eoFiltered.length/eoPerPage)){eoPage++;renderEOTable();} }
 
 
-// ===== NEWSLETTER DATA (built dynamically from 'newsletter' Google Sheet tab) =====
-// Each newsletter campaign is grouped by its Subject line (e.g. "...Weekly Newsletter | Jun 15, 2026")
-let nlWeeks = [];          // [{week,label,sent,read,clicked,rows:[...]}]
-let nlGroupsByRows = {};   // subject -> raw recipient rows (csvData shape)
+// ===== NEWSLETTER DATA =====
+// ===== NEWSLETTER DATA (built dynamically from uploaded Newsletter CSV) =====
+// Each campaign is grouped by its Subject line (e.g. "...Weekly Newsletter | Jun 15, 2026").
+// This is row-per-recipient data (like tag_emails), so we compute sent/read/clicked by counting rows.
+let nlWeeks = [];
+let nlGroupRows = {}; // index -> raw recipient rows (csvData-shape) for that campaign
 
-function rebuildNewsletterData() {
-    const groups = {}; // subject -> array of raw sheet rows
-    gNewsletter.forEach(r => {
-        const subj = r['Subject'] || 'Unknown Campaign';
-        if(!groups[subj]) groups[subj] = [];
-        groups[subj].push(r);
+function handleNewsletterCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            parseNewsletterCSV(e.target.result);
+            renderNLList();
+            selectNLWeek(0);
+        } catch(err) {
+            console.error('Newsletter CSV parse error:', err);
+        }
+    };
+    reader.readAsText(file);
+}
+
+// Newsletter CSV is now PRE-AGGREGATED (one row per campaign), same shape as the
+// Nurture CSV: Name, Sent count, Read count, Read ratio, Bounced, Unique clicks,
+// Unique clicks ratio, Unsubscribed, Unsubscribed ratio. No per-recipient rows anymore,
+// so each row becomes one "week" entry directly — no grouping needed.
+function parseNewsletterCSV(text) {
+    const allRows = splitCSVRows(text.trim());
+    if (allRows.length < 2) { nlWeeks = []; return; }
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+
+    const nameIdx    = headers.findIndex(h => h === 'name');
+    const sentIdx    = headers.findIndex(h => h === 'sent count');
+    const readIdx     = headers.findIndex(h => h === 'read count');
+    const clickIdx    = headers.findIndex(h => h === 'unique clicks');
+    const bounceIdx   = headers.findIndex(h => h === 'bounced');
+    const unsubIdx    = headers.findIndex(h => h === 'unsubscribed');
+
+    const campaigns = [];
+    for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
+        const rawName = (cols[nameIdx] || '').trim();
+        if (!rawName) continue;
+        campaigns.push({
+            label: rawName,
+            sent: parseInt(cols[sentIdx], 10) || 0,
+            read: parseInt(cols[readIdx], 10) || 0,
+            clicked: parseInt(cols[clickIdx], 10) || 0,
+            bounced: parseInt(cols[bounceIdx], 10) || 0,
+            unsubscribed: parseInt(cols[unsubIdx], 10) || 0
+        });
+    }
+
+    // Sort most-recent first. Campaign names contain a date like "2026.06.17" —
+    // extract it for sorting; fall back to CSV row order if no date is found.
+    campaigns.sort((a, b) => {
+        const da = (a.label.match(/(\d{4})\.(\d{2})\.(\d{2})/) || []).slice(1).join('-');
+        const db = (b.label.match(/(\d{4})\.(\d{2})\.(\d{2})/) || []).slice(1).join('-');
+        return db.localeCompare(da);
     });
-    // Sort campaigns by most recent "Date sent" first
-    const subjects = Object.keys(groups).sort((a,b) => {
-        const da = new Date(groups[a][0]['Date sent']||0);
-        const db = new Date(groups[b][0]['Date sent']||0);
-        return db - da;
-    });
-    nlWeeks = subjects.map((subj, i) => {
-        const rawRows = groups[subj];
-        const rows = rawRows.map(toRecipientRow);
-        const sent = rows.length;
-        const read = rows.filter(r=>r.read==='Yes').length;
-        const clicked = rows.filter(r=>r.clicked==='Yes').length;
-        nlGroupsByRows[i] = rows;
-        return { week:'Week '+(i+1), label: subj, sent, read, clicked };
-    });
-    if(!nlWeeks.length) nlWeeks = [{week:'Week 1',label:'No newsletter data yet',sent:0,read:0,clicked:0}];
+
+    nlWeeks = campaigns.map((c, i) => ({ week: 'Week '+(i+1), label: c.label, sent: c.sent, read: c.read, clicked: c.clicked, bounced: c.bounced }));
 }
 
 let nlSelectedWeek = 0;
@@ -2153,17 +2558,18 @@ const nlPerPage = 12;
 
 function showNewsletter() {
     showPage('page-newsletter', 'nav-newsletter');
-    rebuildNewsletterData();
     renderNLList();
     selectNLWeek(0);
 }
 
-function renderNewsletter() { rebuildNewsletterData(); renderNLList(); selectNLWeek(nlSelectedWeek); }
-
 function renderNLList() {
-    const wcEl = document.getElementById('nl-weeks-count');
-    if(wcEl) wcEl.textContent = nlWeeks.length + (nlWeeks.length===1?' Campaign':' Campaigns');
+    const countEl = document.getElementById('nl-weeks-count');
+    if (countEl) countEl.textContent = nlWeeks.length + (nlWeeks.length===1?' Campaign':' Campaigns');
     const container = document.getElementById('nl-list');
+    if (!nlWeeks.length) {
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-10">No newsletter data yet — upload the Newsletter CSV above.</p>';
+        return;
+    }
     container.innerHTML = nlWeeks.map((w, i) => {
         const openRate  = w.sent ? (w.read/w.sent*100).toFixed(1)+'%' : '—';
         const clickRate = w.sent ? (w.clicked/w.sent*100).toFixed(1)+'%' : '—';
@@ -2187,6 +2593,15 @@ function renderNLList() {
 }
 
 function selectNLWeek(i) {
+    if (!nlWeeks.length) {
+        const ids = ['nl-funnel-label','nl-kpi-sent','nl-kpi-read','nl-kpi-click','nl-kpi-notopen','nl-f-sent-val','nl-f-read-val','nl-f-click-val','nl-eg-clicked','nl-eg-opened','nl-eg-notopened'];
+        ids.forEach(id => { const el=document.getElementById(id); if(el) el.textContent='—'; });
+        const rc = document.getElementById('nl-rec-count'); if(rc) rc.textContent = '0 contacts';
+        nlFiltered = [];
+        renderNLTable();
+        drawNLDonut(0,0,0,0);
+        return;
+    }
     nlSelectedWeek = i;
     renderNLList();
 
@@ -2221,19 +2636,14 @@ function selectNLWeek(i) {
     document.getElementById('nl-eg-notopened').textContent = notOpen || '—';
     drawNLDonut(w.clicked, openedNotClicked, notOpen, w.sent);
 
-    // Recipients for the selected newsletter week, sourced from the Google Sheet
-    const emailData = nlGroupsByRows[i] || [];
-    // Sort: Clicked first, then Opened, then Not Opened
-    const sorted = [...emailData].sort((a,b) => {
-        const score = r => r.clicked==='Yes' ? 2 : r.read==='Yes' ? 1 : 0;
-        return score(b) - score(a);
-    });
-    document.getElementById('nl-rec-count').textContent = sorted.length + ' contacts';
-    nlFiltered = sorted;
+    // Recipients for this specific newsletter campaign, from the master Recipients CSV.
+    // Matched by exact campaign label (same "Name" string in both CSVs).
+    const recipientRows = recipientsByNewsletter[w.label] || [];
+    document.getElementById('nl-rec-count').textContent = recipientRows.length + ' contacts';
+    nlFiltered = recipientRows.slice();
     nlPage = 1;
     const srch=document.getElementById('nlSearchInput'); if(srch) srch.value='';
-    const fsel=document.getElementById('nlFilterSel');   if(fsel) fsel.value='all';
-    renderNLTable();
+    filterNLRecipients();
 }
 
 function drawNLDonut(clicked, openedNot, notOpened, total) {
@@ -2265,17 +2675,17 @@ function drawNLDonut(clicked, openedNot, notOpened, total) {
 }
 
 function filterNLRecipients() {
-    const q=document.getElementById('nlSearchInput').value.toLowerCase();
-    const f=document.getElementById('nlFilterSel').value;
-    const base = nlGroupsByRows[nlSelectedWeek] || [];
-    const sorted = [...base].sort((a,b)=>{
-        const score=r=>r.clicked==='Yes'?2:r.read==='Yes'?1:0;
-        return score(b)-score(a);
-    });
-    nlFiltered = sorted.filter(r=>{
-        const mq=r.email.toLowerCase().includes(q);
-        const mf=f==='all'?true:f==='clicked'?r.clicked==='Yes':f==='opened'?r.read==='Yes':r.read==='No';
-        return mq&&mf;
+    const q = (document.getElementById('nlSearchInput').value || '').toLowerCase();
+    const f = document.getElementById('nlFilterSel') ? document.getElementById('nlFilterSel').value : 'all';
+    const w = nlWeeks[nlSelectedWeek];
+    const base = w ? (recipientsByNewsletter[w.label] || []) : [];
+    nlFiltered = base.filter(r => {
+        const mq = r.email.toLowerCase().includes(q);
+        const mf = f === 'all' ? true
+                 : f === 'opened' ? r.read === 'Yes'
+                 : f === 'clicked' ? r.clicked === 'Yes'
+                 : r.read === 'No';
+        return mq && mf;
     });
     nlPage=1; renderNLTable();
 }
@@ -2287,12 +2697,11 @@ function renderNLTable() {
     if(!tbody) return;
     tbody.innerHTML = rows.length ? rows.map(r=>`
         <tr class="hover:bg-gray-800/20 transition">
-            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
             <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
-            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
-            <td class="text-center">${r.clicked==='Yes'?'<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
+            <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':r.read==='No'?'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>':'<span class="text-gray-600">—</span>'}</td>
         </tr>`).join('') :
-        '<tr><td colspan="4" class="py-6 text-center text-gray-600 text-xs">No data — upload CSV to populate</td></tr>';
+        '<tr><td colspan="3" class="py-6 text-center text-gray-600 text-xs">No recipients found for this campaign</td></tr>';
     const total=nlFiltered.length;
     const info=document.getElementById('nlPageInfo');
     if(info) info.textContent=total?`${start+1}–${Math.min(start+nlPerPage,total)} of ${total}`:'';
@@ -2300,12 +2709,453 @@ function renderNLTable() {
 function nlPrevPage(){ if(nlPage>1){nlPage--;renderNLTable();} }
 function nlNextPage(){ if(nlPage<Math.ceil(nlFiltered.length/nlPerPage)){nlPage++;renderNLTable();} }
 
-// ===== INIT: load from Google Sheets, then auto-refresh every 2 hours =====
-window.addEventListener('load', () => {
-    showHome();
-    loadAllData();
-    setInterval(loadAllData, REFRESH_MS);
-});
+// ===== CSV UPLOAD & PARSE =====
+// ===== UNIFIED MULTI-FILE UPLOAD: auto-detects CSV type from headers + content =====
+// Newsletter, Nurture, and All-Engagement CSVs now all share the SAME column shape
+// (Name, Sent count, Read count, Read ratio, Unique clicks, ..., Bounced, ...), so we
+// can no longer tell them apart by headers alone — we inspect the "Name" column values:
+//   - Forms:          has "Contact First Name" header, no "Date sent"
+//   - Recipients:      has "Contact First Name" AND "Date sent" (the master per-recipient
+//                      list — Name=category, email, Date sent — no Read/Clicked columns)
+//   - Nurture:        Name values end in " A" / " B" (A/B test variant suffix)
+//   - Newsletter:     Name values contain "Newsletter"
+//   - All-Engagement: Name values match known category names (Gold Membership, News
+//                      with Restaurant Association, etc.) — checked last as the fallback
+//                      for this shared shape, since it covers the most distinct row count.
+function detectCSVType(text) {
+    const allRows = splitCSVRows(text.trim());
+    if (!allRows.length) return 'unknown';
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+    const has = (name) => headers.includes(name);
+
+    if (has('contact first name') && has('date sent') && !has('subject')) return 'recipients';
+    if (has('contact first name') && !has('subject')) return 'forms';
+    if (has('subject') && !has('sent count')) return 'signup'; // legacy per-recipient tag_emails format, if ever used again
+
+    if (has('name') && has('sent count')) {
+        const nameIdx = headers.indexOf('name');
+        const names = allRows.slice(1, 6).map(r => (r[nameIdx]||'').trim()); // sample first few rows
+        if (names.some(n => /\s[AB]$/.test(n))) return 'nurture';
+        if (names.some(n => /newsletter/i.test(n))) return 'newsletter';
+        if (names.some(n => Object.values(categoryToEngagementName).includes(n))) return 'engagement';
+        return 'unknown';
+    }
+    return 'unknown';
+}
+
+function handleAnyCSVUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const status = document.getElementById('upload-status');
+    status.style.color = '#9ca3af';
+    status.textContent = `Reading ${files.length} file(s)...`;
+
+    const results = []; // {name, type, ok}
+    let remaining = files.length;
+
+    files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const text = e.target.result;
+            const type = detectCSVType(text);
+            try {
+                switch (type) {
+                    case 'signup':     parseCSV(text, file.name); break;
+                    case 'newsletter': parseNewsletterCSV(text); break;
+                    case 'nurture':    parseNurtureCSV(text); break;
+                    case 'forms':      parseFormsCSV(text); break;
+                    case 'engagement': parseEngagementCSV(text); break;
+                    case 'recipients': parseRecipientsCSV(text); break;
+                    default: throw new Error('Unrecognized CSV format');
+                }
+                results.push({ name: file.name, type, ok: true });
+            } catch (err) {
+                console.error('Error parsing', file.name, err);
+                results.push({ name: file.name, type, ok: false });
+            }
+            remaining--;
+            if (remaining === 0) finishUpload();
+        };
+        reader.onerror = function() {
+            results.push({ name: file.name, type: 'unknown', ok: false });
+            remaining--;
+            if (remaining === 0) finishUpload();
+        };
+        reader.readAsText(file);
+    });
+
+    function finishUpload() {
+        // Re-render every page's data regardless of which one is currently visible,
+        // so switching to any page afterward shows fresh data immediately.
+        renderHome();
+        renderNLList();
+        if (nlWeeks.length) selectNLWeek(0);
+        renderNurturing();
+        // Also refresh whichever page is actually on screen right now (covers funnel bars, donuts, etc.)
+        refreshCurrentPageAfterUpload();
+
+        const okCount = results.filter(r => r.ok).length;
+        const failCount = results.length - okCount;
+        const typeLabels = { signup:'Sign Up (legacy)', newsletter:'Newsletter', nurture:'Nurture', forms:'Forms', engagement:'All-Engagement', recipients:'Recipients', unknown:'Unrecognized' };
+        const summary = results.map(r => `${r.ok ? '✓' : '✗'} ${typeLabels[r.type]}: ${r.name}`).join(' | ');
+        status.textContent = summary;
+        status.style.color = failCount ? '#f87171' : '#34d399';
+
+        // Auto-hide the success/error message after a few seconds, reverting to the
+        // default placeholder so it doesn't clutter the sidebar permanently.
+        clearTimeout(window._uploadStatusTimer);
+        window._uploadStatusTimer = setTimeout(() => {
+            status.textContent = 'Select 1 or more CSVs — type auto-detected';
+            status.style.color = '#6b7280';
+        }, 5000);
+    }
+}
+
+// Re-renders whatever page is currently visible, so the user sees fresh data
+// immediately even without navigating away and back.
+function refreshCurrentPageAfterUpload() {
+    const active = document.querySelector('[id^="page-"].visible');
+    if (!active) return;
+    const pid = active.id;
+    if (pid === 'page-home')        renderHome();
+    if (pid === 'page-nurturing')   renderNurturing();
+    if (pid === 'page-category' && typeof currentCategory !== 'undefined' && currentCategory) showCategory(currentCategory);
+    if (pid === 'page-registration' && typeof currentRegName !== 'undefined' && currentRegName) showRegistration(currentRegName);
+    if (pid === 'page-newsletter' && nlWeeks.length)  selectNLWeek(nlSelectedWeek || 0);
+}
+
+// ===== MAUTIC API REFRESH SYSTEM =====
+// Maps each Mautic report ID to its parse function + display label.
+// The API returns JSON with a "data" array where each element is an object
+// matching the CSV columns, so we convert it back to CSV text for the existing parsers.
+const REPORT_MAP = [
+    { id: 14, type: 'engagement', label: 'All Engagement' },
+    { id: 15, type: 'recipients', label: 'Sent Recipients' },
+    { id: 13, type: 'nurture',    label: 'Nurture Emails' },
+    { id: 12, type: 'newsletter', label: 'Newsletter' },
+    { id: 10, type: 'forms',      label: 'Form Submissions' }
+];
+
+// Convert Mautic API JSON response to CSV text so existing parsers can handle it.
+// The API returns { data: [ {col1: val, col2: val, ...}, ... ], headers: [...] }
+function apiJsonToCsv(json) {
+    if (!json || !json.data) return '';
+    const rows = json.data;
+    if (!rows.length) return '';
+    // Use the keys from the first row as headers
+    const keys = Object.keys(rows[0]);
+    const headerRow = keys.join(',');
+    const dataRows = rows.map(row =>
+        keys.map(k => {
+            const val = (row[k] == null ? '' : String(row[k]));
+            // Wrap in quotes if value contains comma, quote, or newline
+            return val.includes(',') || val.includes('"') || val.includes('\n')
+                ? '"' + val.replace(/"/g, '""') + '"'
+                : val;
+        }).join(',')
+    );
+    return [headerRow, ...dataRows].join('\n');
+}
+
+async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
+    const url = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}`;
+    const resp = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include' // sends cookies for session-auth
+    });
+    if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status} for report ${reportId}`);
+    }
+    return await resp.json();
+}
+
+async function fetchAllReports() {
+    const baseUrl  = (document.getElementById('api-base-url').value || '').trim().replace(/\/+$/, '');
+    const dateFrom = document.getElementById('api-date-from').value || '2026-01-01';
+    const dateToEl = document.getElementById('api-date-to');
+    const dateTo   = dateToEl && dateToEl.value ? dateToEl.value : new Date().toISOString().slice(0, 10);
+
+    if (!baseUrl) {
+        const s = document.getElementById('upload-status');
+        s.textContent = '⚠ Please enter your Mautic base URL first';
+        s.style.color = '#fbbf24';
+        return;
+    }
+
+    // UI: loading state
+    const btn      = document.getElementById('refresh-btn');
+    const btnText  = document.getElementById('refresh-btn-text');
+    const icon     = document.getElementById('refresh-icon');
+    const status   = document.getElementById('upload-status');
+    const progress = document.getElementById('api-progress-bar');
+    const fill     = document.getElementById('api-progress-fill');
+    const progText = document.getElementById('api-progress-text');
+
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    icon.classList.add('fa-spin');
+    btnText.textContent = 'Fetching...';
+    progress.classList.remove('hidden');
+    fill.style.width = '0%';
+    status.textContent = 'Connecting to Mautic...';
+    status.style.color = '#9ca3af';
+
+    const results = [];
+    for (let i = 0; i < REPORT_MAP.length; i++) {
+        const { id, type, label } = REPORT_MAP[i];
+        progText.textContent = `Fetching ${label}... (${i+1}/${REPORT_MAP.length})`;
+        fill.style.width = ((i / REPORT_MAP.length) * 90) + '%';
+        try {
+            const json = await fetchSingleReport(baseUrl, id, dateFrom, dateTo);
+            const csvText = apiJsonToCsv(json);
+            // Feed into the correct parser (same as CSV upload path)
+            switch (type) {
+                case 'engagement': parseEngagementCSV(csvText); break;
+                case 'recipients': parseRecipientsCSV(csvText); break;
+                case 'nurture':    parseNurtureCSV(csvText);    break;
+                case 'newsletter': parseNewsletterCSV(csvText); break;
+                case 'forms':      parseFormsCSV(csvText);      break;
+            }
+            results.push({ label, ok: true });
+        } catch (err) {
+            console.error(`Report ${id} (${label}) fetch error:`, err);
+            results.push({ label, ok: false, err: err.message });
+        }
+    }
+
+    // Re-render all pages with fresh data
+    fill.style.width = '100%';
+    progText.textContent = 'Rendering...';
+    renderHome();
+    renderNLList();
+    if (nlWeeks.length) selectNLWeek(0);
+    renderNurturing();
+    refreshCurrentPageAfterUpload();
+
+    // Reset UI
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    icon.classList.remove('fa-spin');
+    btnText.textContent = 'Refresh Data';
+
+    const okCount   = results.filter(r => r.ok).length;
+    const failCount = results.length - okCount;
+    if (failCount === 0) {
+        status.textContent = `✓ All ${okCount} reports loaded — ${new Date().toLocaleTimeString()}`;
+        status.style.color = '#34d399';
+    } else if (okCount === 0) {
+        status.textContent = `✗ All requests failed — check URL & CORS`;
+        status.style.color = '#f87171';
+    } else {
+        const failLabels = results.filter(r=>!r.ok).map(r=>r.label).join(', ');
+        status.textContent = `⚠ ${okCount} ok, ${failCount} failed: ${failLabels}`;
+        status.style.color = '#fbbf24';
+    }
+
+    // Hide progress bar after a moment
+    setTimeout(() => { progress.classList.add('hidden'); fill.style.width = '0%'; }, 3000);
+
+    // Save base URL to localStorage for convenience
+    try { localStorage.setItem('mautic_base_url', baseUrl); } catch(e) {}
+}
+
+// Restore saved base URL on load
+(function restoreApiSettings() {
+    try {
+        const saved = localStorage.getItem('mautic_base_url');
+        if (saved) {
+            const el = document.getElementById('api-base-url');
+            if (el) el.value = saved;
+        }
+    } catch(e) {}
+    // Set today's date as default "Date To"
+    try {
+        const toEl = document.getElementById('api-date-to');
+        if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
+    } catch(e) {}
+})();
+
+// ===== END MAUTIC API REFRESH SYSTEM =====
+
+function handleCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const status = document.getElementById('upload-status');
+    status.textContent = 'Reading...';
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            parseCSV(e.target.result, file.name);
+            status.textContent = '✓ ' + file.name;
+            status.style.color = '#34d399';
+        } catch(err) {
+            status.textContent = '✗ Error reading CSV';
+            status.style.color = '#f87171';
+            console.error(err);
+        }
+    };
+    reader.readAsText(file);
+}
+
+// Splits raw CSV text into rows, respecting quoted fields that may contain commas/newlines.
+function splitCSVRows(text) {
+    const rows=[]; let row=[]; let cur=''; let inQ=false;
+    for(let i=0;i<text.length;i++){
+        const c=text[i];
+        if(c==='"'){
+            if(inQ && text[i+1]==='"'){ cur+='"'; i++; continue; }
+            inQ=!inQ; continue;
+        }
+        if(c===','&&!inQ){ row.push(cur); cur=''; continue; }
+        if((c==='\n'||c==='\r')&&!inQ){
+            if(c==='\r'&&text[i+1]==='\n') i++;
+            row.push(cur); cur='';
+            if(row.length>1||row[0]!=='') rows.push(row);
+            row=[]; continue;
+        }
+        cur+=c;
+    }
+    if(cur!==''||row.length){ row.push(cur); rows.push(row); }
+    return rows;
+}
+
+function parseCSV(text, filename) {
+    const allRows = splitCSVRows(text.trim());
+    if (allRows.length < 2) { csvData.length = 0; return; }
+    const headers = allRows[0].map(h => h.trim().toLowerCase());
+
+    // Find columns by exact-ish name match (avoids "Date read" being mistaken for "Read")
+    const emailIdx   = headers.findIndex(h => h === 'email address') !== -1
+                        ? headers.findIndex(h => h === 'email address')
+                        : headers.findIndex(h => h.includes('email'));
+    const sentIdx    = headers.findIndex(h => h === 'date sent') !== -1
+                        ? headers.findIndex(h => h === 'date sent')
+                        : headers.findIndex(h => h.includes('sent'));
+    const readIdx    = headers.findIndex(h => h === 'read'); // exact "Read" column (Yes/No)
+    const dateReadIdx= headers.findIndex(h => h === 'date read');
+    const clickIdx   = headers.findIndex(h => h === 'clicked') !== -1
+                        ? headers.findIndex(h => h === 'clicked')
+                        : headers.findIndex(h => h.includes('click'));
+    const bounceIdx  = headers.findIndex(h => h.includes('bounce'));
+    const subjectIdx = headers.findIndex(h => h.includes('subject'));
+
+    // Clear and refill csvData
+    csvData.length = 0;
+    let firstSubject = '', firstSentDate = '';
+    for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
+        const email = (cols[emailIdx] || '').trim();
+        if (!email) continue;
+        const sentRaw = (cols[sentIdx] || '').trim();
+        let timeStr = sentRaw;
+        try {
+            const d = new Date(sentRaw);
+            if (!isNaN(d)) timeStr = d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+        } catch(e) {}
+
+        // Prefer the explicit "Read" Yes/No column; fall back to "Date read" non-empty check.
+        let readVal = 'No';
+        if (readIdx !== -1 && cols[readIdx] !== undefined) {
+            readVal = (cols[readIdx]||'').trim().toLowerCase() === 'yes' ? 'Yes' : 'No';
+        } else if (dateReadIdx !== -1) {
+            readVal = (cols[dateReadIdx]||'').trim() !== '' ? 'Yes' : 'No';
+        }
+
+        if (!firstSubject && subjectIdx !== -1) firstSubject = (cols[subjectIdx]||'').trim();
+        if (!firstSentDate) firstSentDate = sentRaw;
+
+        csvData.push({
+            email:   email,
+            sent:    timeStr,
+            sentRaw: sentRaw,
+            read:    readVal,
+            clicked: (cols[clickIdx]  || '').trim().toLowerCase() === 'yes' ? 'Yes' : 'No',
+            bounced: bounceIdx !== -1 ? ((cols[bounceIdx]||'').trim().toLowerCase() === 'yes' ? 'Yes' : 'No') : 'No'
+        });
+    }
+    csvData.subject = firstSubject;
+    csvData.sentDate = firstSentDate;
+
+    // Rebuild orgData
+    const domainCount = {};
+    csvData.forEach(r => {
+        const domain = r.email.split('@')[1];
+        if(domain) domainCount[domain] = (domainCount[domain]||0)+1;
+    });
+    orgData.length = 0;
+    Object.entries(domainCount).sort((a,b)=>b[1]-a[1]).slice(0,15).forEach(e=>orgData.push(e));
+
+    // Refresh current page
+    renderHome(); // home page table/event-occur numbers, harmless if not visible
+    const activePage = document.querySelector('[id^="page-"].visible');
+    if(activePage){
+        const pid = activePage.id;
+        if(pid==='page-signup')   { renderSignupKPIs(); renderRecipients(); renderOrgs(); drawDonut2(); }
+        if(pid==='page-category' && currentCategory) showCategory(currentCategory);
+        if(pid==='page-newsletter') selectNLWeek(nlSelectedWeek);
+    }
+    console.log('CSV loaded:', csvData.length, 'rows. Read=Yes:', csvData.filter(r=>r.read==='Yes').length, 'Clicked=Yes:', csvData.filter(r=>r.clicked==='Yes').length, 'Bounced=Yes:', csvData.filter(r=>r.bounced==='Yes').length);
+}
+
+// Fills every KPI card, funnel bar, and engagement number on the Sign Up page from csvData
+function renderSignupKPIs() {
+    const sent = csvData.length;
+    const opened = csvData.filter(r=>r.read==='Yes').length;
+    const clicked = csvData.filter(r=>r.clicked==='Yes').length;
+    const bounced = csvData.filter(r=>r.bounced==='Yes').length;
+    const notOpen = sent - opened;
+    const domains = new Set(csvData.map(r=>r.email.split('@')[1]).filter(Boolean));
+    const openedNotClicked = opened - clicked;
+
+    // Reset the recipient-table filter state to the fresh csvData every time KPIs
+    // are (re)rendered, e.g. after a new CSV upload. Without this, "filtered" keeps
+    // pointing at the old (often empty) array from page-load time.
+    filtered = [...csvData];
+    currentPage = 1;
+
+    const openRate   = pct(opened, sent);
+    const clickRate  = pct(clicked, sent);
+    const cto        = pct(clicked, opened);
+    const bounceRate = pct(bounced, sent);
+    const notOpenPct = pct(notOpen, sent);
+
+    const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
+    set('su-subject', csvData.subject || '—');
+    set('su-date', csvData.sentDate ? csvData.sentDate.split(',')[0] : '—');
+    set('su-sent', sent || 0);
+    set('su-opened', opened || 0);
+    set('su-openrate-sub', 'Open rate: ' + openRate);
+    set('su-clicked', clicked || 0);
+    set('su-clickrate-sub', 'Click rate: ' + clickRate);
+    set('su-cto', cto);
+    set('su-orgs', domains.size || 0);
+    set('su-notopen', notOpen || 0);
+    set('su-notopen-sub', notOpenPct + ' of sent');
+    set('su-bounced', bounced || 0);
+    set('su-bounced-sub', bounceRate + ' bounce rate');
+    set('su-openrate', openRate);
+    set('su-contact-count', sent + ' contacts');
+
+    // Funnel
+    set('su-funnel-subject', csvData.subject || '—');
+    const fSent = document.getElementById('su-funnel-sent-bar');
+    if (fSent) { fSent.style.width='100%'; fSent.textContent = sent || 0; }
+    const fOpen = document.getElementById('su-funnel-open-bar');
+    if (fOpen) { fOpen.style.width = (sent ? (opened/sent*100) : 0) + '%'; fOpen.textContent = opened || 0; }
+    set('su-funnel-open-pct', openRate);
+    const fClick = document.getElementById('su-funnel-click-bar');
+    if (fClick) { fClick.style.width = (sent ? Math.max(clicked/sent*100, clicked?3:0) : 0) + '%'; fClick.textContent = clicked || 0; }
+    set('su-funnel-click-pct', clickRate);
+
+    // Engagement breakdown
+    set('su-eng-clicked', clicked || 0);
+    set('su-eng-openedonly', openedNotClicked || 0);
+    set('su-eng-notopened', notOpen || 0);
+}
+
+// ===== INIT =====
+window.addEventListener('load', () => { showHome(); });
 </script>
 
 <!-- ===== NEWSLETTER PAGE ===== -->
@@ -2319,6 +3169,10 @@ window.addEventListener('load', () => {
         <i class="fa-solid fa-newspaper text-gray-300 text-xl"></i>
         <h1 class="text-xl font-bold">Newsletter</h1>
         <span class="text-[11px] text-gray-400 bg-gray-800/70 px-3 py-1 rounded-full">Weekly Campaign</span>
+        <label class="ml-auto text-[11px] text-gray-300 bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-arrow-up-from-bracket text-[10px]"></i> Upload Newsletter CSV
+            <input type="file" accept=".csv" class="hidden" onchange="handleAnyCSVUpload(event)" multiple>
+        </label>
     </div>
 
     <!-- Top Section: Newsletter List + Funnel -->
@@ -2330,7 +3184,7 @@ window.addEventListener('load', () => {
                 <h3 class="text-sm font-semibold flex items-center gap-2">
                     <i class="fa-solid fa-list text-gray-400 text-xs"></i> Newsletter Campaigns
                 </h3>
-                <span class="text-[10px] text-gray-500" id="nl-weeks-count">8 Weeks</span>
+                <span class="text-[10px] text-gray-500" id="nl-weeks-count">0 Campaigns</span>
             </div>
             <div class="space-y-1" id="nl-list">
                 <!-- filled by JS -->
@@ -2423,7 +3277,6 @@ window.addEventListener('load', () => {
                             <th class="pb-2 font-semibold">EMAIL</th>
                             <th class="pb-2 font-semibold text-center">SENT</th>
                             <th class="pb-2 font-semibold text-center">READ</th>
-                            <th class="pb-2 font-semibold text-center">CLICKED</th>
                         </tr>
                     </thead>
                     <tbody id="nlRecipientBody" class="divide-y divide-gray-800/30"></tbody>
@@ -2444,6 +3297,7 @@ window.addEventListener('load', () => {
                 <h3 class="text-sm font-semibold">Engagement</h3>
                 <span class="text-[10px] text-gray-500">Breakdown</span>
             </div>
+            
             <div class="flex flex-col items-center justify-center flex-1 gap-4">
                 <canvas id="nlDonut" width="140" height="140"></canvas>
                 <div class="space-y-2.5 w-full">
@@ -2464,7 +3318,7 @@ window.addEventListener('load', () => {
         </div>
     </div>
 
-</div>
+</div><!-- end page-newsletter -->
 
 </body>
-</html> 
+</html>
