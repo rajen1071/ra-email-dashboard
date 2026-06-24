@@ -262,7 +262,7 @@
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
                 <span class="flex items-center gap-2"><i class="fa-solid fa-clipboard-list text-amber-500 text-sm"></i><h3 class="text-sm font-semibold">Registration Form</h3></span>
-                <span class="text-[9px] text-gray-400 font-bold bg-gray-800/50 px-2 py-0.5 rounded border border-gray-700/40 uppercase" id="home-reg-source-badge">No data yet — click Refresh Data</span>
+                <span class="text-[9px] text-gray-400 font-bold bg-gray-800/50 px-2 py-0.5 rounded border border-gray-700/40 uppercase" id="home-reg-source-badge">Upload Forms CSV</span>
             </div>
             <table class="w-full text-xs text-left">
                 <thead><tr class="text-blue-400 border-b border-gray-800">
@@ -360,7 +360,7 @@
                 <span class="text-[10px] text-gray-500">By email count</span>
             </div>
             <div id="home-orgs-list" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;">
-                <p class="text-xs text-gray-600 text-center py-8">No data yet — click Refresh Data.</p>
+                <p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>
             </div>
         </div>
     </div>
@@ -895,7 +895,7 @@
                 <span class="text-[10px] text-gray-500">By email count</span>
             </div>
             <div class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;" id="cat-orgs-list">
-                <p class="text-xs text-gray-600 text-center py-8">No data yet — click Refresh Data.</p>
+                <p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>
             </div>
         </div>
     </div>
@@ -1101,6 +1101,10 @@
         <i class="fa-solid fa-clipboard-list text-amber-500 text-xl"></i>
         <h1 class="text-xl font-bold" id="reg-title">Registration</h1>
         <span class="text-[11px] text-amber-400 bg-amber-900/20 border border-amber-800/30 px-3 py-1 rounded-full font-semibold" id="reg-badge">—</span>
+        <label class="ml-auto text-[11px] text-gray-300 bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-arrow-up-from-bracket text-[10px]"></i> Upload Forms CSV
+            <input type="file" accept=".csv" class="hidden" onchange="handleAnyCSVUpload(event)" multiple>
+        </label>
     </div>
 
     <!-- KPI Cards Row 1 -->
@@ -1344,7 +1348,7 @@ function renderHome() {
     if (eoList) {
         const anyData = categoryOrder.some(cat => engagementData[cat]);
         if (!anyData) {
-            eoList.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — click Refresh Data.</p>';
+            eoList.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — upload the All-Engagement CSV above.</p>';
         } else {
             const maxSent = Math.max(1, ...categoryOrder.map(c => engagementData[c] ? engagementData[c].sent : 0));
             eoList.innerHTML = categoryOrder.map(cat => {
@@ -1382,7 +1386,7 @@ function renderHome() {
         });
         const anyUploaded = Object.values(regData).some(d => d.submissions != null);
         const badge = document.getElementById('home-reg-source-badge');
-        if (badge) badge.textContent = anyUploaded ? 'Live from Mautic API' : 'No data yet — click Refresh Data';
+        if (badge) badge.textContent = anyUploaded ? 'From Forms CSV' : 'Upload Forms CSV';
     }
 
     // Newsletter summary widget — top 8 most recent campaigns from the uploaded Newsletter CSV
@@ -1395,7 +1399,7 @@ function renderHome() {
                     `<tr class="orange-text"><td class="py-1.5 font-medium" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.label}</td><td class="text-center">${w.sent||'-'}</td><td class="text-center">${w.read||'-'}</td><td class="text-center">${w.clicked||'-'}</td></tr>`
                 ).join('');
             } else {
-                nlTbody.innerHTML = '<tr><td colspan="4" class="py-3 text-center text-gray-600 text-xs">No newsletter data — click Refresh Data</td></tr>';
+                nlTbody.innerHTML = '<tr><td colspan="4" class="py-3 text-center text-gray-600 text-xs">No newsletter data — upload Newsletter CSV</td></tr>';
             }
         }
     }
@@ -1415,7 +1419,7 @@ function renderHome() {
                     return `<tr class="orange-text hover:bg-gray-800/20 transition"><td class="py-3 font-medium text-left text-sm">${cleanNurtureName(e.baseName)}</td><td>${s||'-'}</td><td>${r||'-'}</td><td>${pct(r,s)}</td><td>${c||'-'}</td><td>${pct(c,s)}</td><td>${no||'-'}</td><td>${pct(no,s)}</td></tr>`;
                 }).join('');
             } else {
-                nurtTbody.innerHTML = '<tr><td colspan="8" class="py-3 text-center text-gray-600 text-xs">No nurture data — click Refresh Data</td></tr>';
+                nurtTbody.innerHTML = '<tr><td colspan="8" class="py-3 text-center text-gray-600 text-xs">No nurture data — upload Nurture CSV</td></tr>';
             }
         }
     }
@@ -1460,7 +1464,7 @@ function renderHomeRecipientTable() {
     const tbody = document.getElementById('homeRecipientBody');
     if (!tbody) return;
     if (!homeFiltered.length) {
-        tbody.innerHTML = '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found — upload the master Recipients CSV.</td></tr>';
         const info = document.getElementById('homePageInfo');
         if (info) info.textContent = 'No results';
         return;
@@ -1484,7 +1488,7 @@ function renderHomeOrgs(rows) {
     const container = document.getElementById('home-orgs-list');
     if (!container) return;
     if (!rows.length) {
-        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — click Refresh Data.</p>';
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>';
         return;
     }
     const domainCount = {};
@@ -1819,7 +1823,7 @@ function filterCatRecipients() {
 function renderCatTable() {
     if (!catFiltered.length) {
         document.getElementById('catRecipientBody').innerHTML =
-            '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found for this category.</td></tr>';
+            '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found — upload the master Recipients CSV, or no match for this category.</td></tr>';
         document.getElementById('catPageInfo').textContent = 'No results';
         return;
     }
@@ -1844,7 +1848,7 @@ function renderCatOrgs(catName) {
     if (!container) return;
     const rows = recipientsByCategory[catName] || [];
     if (!rows.length) {
-        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — click Refresh Data.</p>';
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>';
         return;
     }
     const domainCount = {};
@@ -1914,7 +1918,7 @@ function nextPage() { if (currentPage < Math.ceil(filtered.length/perPage)) { cu
 function renderOrgs() {
     const container = document.getElementById('orgList');
     if (!orgData.length) {
-        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-6">No data — click Refresh Data</p>';
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-6">No data — upload CSV to populate</p>';
         return;
     }
     const max = orgData[0][1];
@@ -2088,7 +2092,7 @@ function renderNurturing() {
     const container = document.getElementById('nurturingEmails');
     if(!container) return;
     if (!nurturingData.length) {
-        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-10">No nurture data yet — click Refresh Data.</p>';
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-10">No nurture data yet — upload the Nurture CSV above.</p>';
         return;
     }
     container.innerHTML = nurturingData.map(e => {
@@ -2577,7 +2581,7 @@ function renderNLList() {
     if (countEl) countEl.textContent = nlWeeks.length + (nlWeeks.length===1?' Campaign':' Campaigns');
     const container = document.getElementById('nl-list');
     if (!nlWeeks.length) {
-        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-10">No newsletter data yet — click Refresh Data.</p>';
+        container.innerHTML = '<p class="text-xs text-gray-600 text-center py-10">No newsletter data yet — upload the Newsletter CSV above.</p>';
         return;
     }
     container.innerHTML = nlWeeks.map((w, i) => {
@@ -3347,6 +3351,10 @@ window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); re
         <i class="fa-solid fa-newspaper text-gray-300 text-xl"></i>
         <h1 class="text-xl font-bold">Newsletter</h1>
         <span class="text-[11px] text-gray-400 bg-gray-800/70 px-3 py-1 rounded-full">Weekly Campaign</span>
+        <label class="ml-auto text-[11px] text-gray-300 bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-arrow-up-from-bracket text-[10px]"></i> Upload Newsletter CSV
+            <input type="file" accept=".csv" class="hidden" onchange="handleAnyCSVUpload(event)" multiple>
+        </label>
     </div>
 
     <!-- Top Section: Newsletter List + Funnel -->
