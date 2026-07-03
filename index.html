@@ -2964,7 +2964,7 @@ function apiJsonToCsv(json, reportId) {
 const API_PAGE_SIZE = 1000; // rows per request; raise/lower if the server has its own cap
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
-    const WORKER_PROXY = 'https://mautic-proxy.rajnarayanen1071.workers.dev';
+    const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
     let start = 0;
     let allRows = [];
     let totalResults = Infinity;
@@ -3025,7 +3025,7 @@ async function fetchSingleReportWithRetry(baseUrl, reportId, dateFrom, dateTo, m
 }
 
 async function fetchAllReports() {
-    const WORKER_PROXY = 'https://mautic-proxy.rajnarayanen1071.workers.dev';
+    const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
     const RA_BASE_URL  = 'https://g1.restaurantassociation.com';
     const dateFrom = document.getElementById('api-date-from').value || '2026-01-01';
     const dateToEl = document.getElementById('api-date-to');
