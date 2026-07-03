@@ -9,6 +9,27 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         body { background-color: #12141c; color: #ffffff; font-family: 'Space Grotesk', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        /* REFRESH OVERLAY — floating pill (non-blocking, bottom-right corner) */
+        #raLoadingOverlay{position:fixed;bottom:24px;right:24px;z-index:99999;display:none;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none;}
+        #raLoadingOverlay.show{display:flex;}
+        .ra-loading-box{background:#1a1d26;border:1px solid #e8533a44;border-radius:12px;padding:14px 18px;min-width:280px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.6);pointer-events:all;}
+        .ra-loading-title{font-size:13px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+        .ra-spinner{width:14px;height:14px;border:2px solid #e8533a33;border-top-color:#e8533a;border-radius:50%;animation:raSpin 0.8s linear infinite;flex-shrink:0;}
+        @keyframes raSpin{to{transform:rotate(360deg);}}
+        .ra-loading-sub{font-size:11px;color:#94a3b8;margin-bottom:10px;}
+        .ra-progress-track{width:100%;height:5px;background:#12141c;border-radius:8px;overflow:hidden;margin-bottom:6px;}
+        .ra-progress-fill{height:100%;background:#e8533a;border-radius:8px;width:0%;transition:width 0.3s ease;}
+        .ra-progress-text{font-size:10px;color:#64748b;text-align:right;margin-bottom:6px;}
+        .ra-report-list{max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;}
+        .ra-report-item{font-size:10px;color:#64748b;display:flex;align-items:center;gap:6px;padding:2px 0;}
+        .ra-report-item.done{color:#34d399;}
+        .ra-report-item.failed{color:#f87171;}
+        .ra-report-item .dot{width:5px;height:5px;border-radius:50%;background:#243350;flex-shrink:0;}
+        .ra-report-item.done .dot{background:#34d399;}
+        .ra-report-item.failed .dot{background:#f87171;}
+        .ra-report-item.pending .dot{background:#e8533a;animation:raPulse 1s ease-in-out infinite;}
+        @keyframes raPulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
         .sidebar { background-color: #1a1d26; }
         .card-bg { background-color: #1a1d26; }
         .orange-text { color: #e8533a; }
@@ -24,6 +45,17 @@
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
+
+<!-- REFRESH LOADING OVERLAY -->
+<div id="raLoadingOverlay">
+  <div class="ra-loading-box">
+    <div class="ra-loading-title"><span class="ra-spinner"></span> Refreshing Dashboard</div>
+    <div class="ra-loading-sub">Fetching live data from Mautic...</div>
+    <div class="ra-progress-track"><div class="ra-progress-fill" id="raProgressFill"></div></div>
+    <div class="ra-progress-text" id="raProgressText">0 / 5 reports</div>
+    <div class="ra-report-list" id="raReportList"></div>
+  </div>
+</div>
 
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar w-72 flex flex-col border-r border-gray-800 shrink-0" style="height:100vh;">
@@ -3030,38 +3062,61 @@ async function fetchAllReports() {
     const dateFrom = document.getElementById('api-date-from').value || '2026-01-01';
     const dateToEl = document.getElementById('api-date-to');
     const dateTo   = dateToEl && dateToEl.value ? dateToEl.value : new Date().toISOString().slice(0, 10);
+    const total    = REPORT_MAP.length;
 
     function proxied(targetUrl) {
         return `${WORKER_PROXY}/?url=${encodeURIComponent(targetUrl)}`;
     }
 
-    // UI: loading state
+    // Sidebar UI
     const btn      = document.getElementById('refresh-btn');
     const btnText  = document.getElementById('refresh-btn-text');
     const icon     = document.getElementById('refresh-icon');
     const status   = document.getElementById('upload-status');
-    const progress = document.getElementById('api-progress-bar');
-    const fill     = document.getElementById('api-progress-fill');
-    const progText = document.getElementById('api-progress-text');
+
+    // Floating overlay UI
+    const overlay     = document.getElementById('raLoadingOverlay');
+    const progressFill = document.getElementById('raProgressFill');
+    const progressText = document.getElementById('raProgressText');
+    const reportListEl = document.getElementById('raReportList');
+
+    // Show overlay with pending dots
+    if (overlay) {
+        overlay.classList.add('show');
+        if (progressFill) progressFill.style.width = '0%';
+        if (progressText) progressText.textContent = `0 / ${total} reports`;
+        if (reportListEl) {
+            reportListEl.innerHTML = REPORT_MAP.map(r =>
+                `<div class="ra-report-item pending" id="ra-item-${r.id}"><span class="dot"></span><span>${r.label}</span></div>`
+            ).join('');
+        }
+    }
 
     btn.disabled = true;
     btn.style.opacity = '0.7';
     icon.classList.add('fa-spin');
     btnText.textContent = 'Fetching...';
-    progress.classList.remove('hidden');
-    fill.style.width = '0%';
     status.textContent = 'Connecting to Mautic...';
     status.style.color = '#9ca3af';
+
+    function markItem(id, state) {
+        const el = document.getElementById(`ra-item-${id}`);
+        if (el) { el.classList.remove('pending','done','failed'); el.classList.add(state); }
+    }
+
+    let completed = 0;
+    function bumpProgress() {
+        completed++;
+        if (progressFill) progressFill.style.width = Math.round((completed / total) * 100) + '%';
+        if (progressText) progressText.textContent = `${completed} / ${total} reports`;
+    }
 
     const results = [];
     for (let i = 0; i < REPORT_MAP.length; i++) {
         const { id, type, label } = REPORT_MAP[i];
-        progText.textContent = `Fetching ${label}... (${i+1}/${REPORT_MAP.length})`;
-        fill.style.width = ((i / REPORT_MAP.length) * 90) + '%';
         try {
             const json = await fetchSingleReportWithRetry(RA_BASE_URL, id, dateFrom, dateTo);
             const csvText = apiJsonToCsv(json, id);
-            // Feed into the correct parser (same as CSV upload path)
             switch (type) {
                 case 'engagement': parseEngagementCSV(csvText); break;
                 case 'recipients': parseRecipientsCSV(csvText); break;
@@ -3070,25 +3125,26 @@ async function fetchAllReports() {
                 case 'forms':      parseFormsCSV(csvText);      break;
             }
             results.push({ label, ok: true });
+            markItem(id, 'done');
+            // Progressive render — show data as soon as each report arrives
+            try {
+                renderHome();
+                renderNLList();
+                if (nlWeeks.length) selectNLWeek(0);
+                renderNurturing();
+                refreshCurrentPageAfterUpload();
+            } catch(e) { /* non-fatal, full render happens at end */ }
         } catch (err) {
             console.error(`Report ${id} (${label}) fetch error:`, err);
             results.push({ label, ok: false, err: err.message });
+            markItem(id, 'failed');
         }
+        bumpProgress();
     }
 
-    // Persist immediately — the data is correct and complete at this point.
-    // Doing this BEFORE render means even if rendering throws on some edge
-    // case in a huge dataset, the fetched data is not lost; refreshing the
-    // page will reload it from storage and try rendering again.
     saveAppDataToStorage();
 
-    // Let the browser repaint (progress bar, "Rendering..." text) before we
-    // run a big synchronous render pass on a large dataset — without this,
-    // the UI can appear frozen/unchanged until the whole render finishes.
-    fill.style.width = '100%';
-    progText.textContent = 'Rendering...';
-    await new Promise(resolve => setTimeout(resolve, 0));
-
+    // Final clean render pass
     let renderError = null;
     try {
         renderHome();
@@ -3097,11 +3153,11 @@ async function fetchAllReports() {
         renderNurturing();
         refreshCurrentPageAfterUpload();
     } catch (err) {
-        console.error('Render error after fetching reports:', err);
+        console.error('Render error:', err);
         renderError = err;
     }
 
-    // Reset UI
+    // Reset sidebar button
     btn.disabled = false;
     btn.style.opacity = '1';
     icon.classList.remove('fa-spin');
@@ -3110,22 +3166,21 @@ async function fetchAllReports() {
     const okCount   = results.filter(r => r.ok).length;
     const failCount = results.length - okCount;
     if (renderError) {
-        status.textContent = `⚠ Data fetched (${okCount} reports) but display failed: ${renderError.message}. Try refreshing the page.`;
+        status.textContent = `⚠ ${okCount} reports loaded but display failed. Try refreshing.`;
         status.style.color = '#fbbf24';
     } else if (failCount === 0) {
         status.textContent = `✓ All ${okCount} reports loaded — ${new Date().toLocaleTimeString()}`;
         status.style.color = '#34d399';
     } else if (okCount === 0) {
-        status.textContent = `✗ All requests failed — check URL & CORS`;
+        status.textContent = `✗ All requests failed — check connection`;
         status.style.color = '#f87171';
     } else {
-        const failLabels = results.filter(r=>!r.ok).map(r=>r.label).join(', ');
-        status.textContent = `⚠ ${okCount} ok, ${failCount} failed: ${failLabels}`;
+        status.textContent = `⚠ ${okCount} ok, ${failCount} failed`;
         status.style.color = '#fbbf24';
     }
 
-    // Hide progress bar after a moment
-    setTimeout(() => { progress.classList.add('hidden'); fill.style.width = '0%'; }, 3000);
+    // Hide overlay after a short delay so user can see final state
+    setTimeout(() => { if (overlay) overlay.classList.remove('show'); }, failCount === 0 ? 800 : 2000);
 }
 
 // Set today's date as default "Date To" on load
