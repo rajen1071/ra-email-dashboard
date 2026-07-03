@@ -6,8 +6,9 @@
     <title>Restaurant Association - Full Email Analytics Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        body { background-color: #12141c; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #12141c; color: #ffffff; font-family: 'Space Grotesk', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .sidebar { background-color: #1a1d26; }
         .card-bg { background-color: #1a1d26; }
         .orange-text { color: #e8533a; }
@@ -116,12 +117,6 @@
 
     <!-- API Refresh Panel -->
     <div class="p-4 pt-3 shrink-0 border-t border-gray-800">
-        <div class="mb-2">
-            <label class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1 block">Mautic Base URL</label>
-            <input id="api-base-url" type="text" placeholder="https://your-mautic.com"
-                value=""
-                class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-        </div>
         <div class="mb-2 flex gap-2">
             <div class="flex-1">
                 <label class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1 block">Date From</label>
@@ -130,7 +125,7 @@
             </div>
             <div class="flex-1">
                 <label class="text-[9px] text-gray-500 uppercase tracking-wider font-semibold mb-1 block">Date To</label>
-                <input id="api-date-to" type="date" id="api-date-to"
+                <input id="api-date-to" type="date"
                     class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-200 focus:outline-none focus:border-[#e8533a]">
             </div>
         </div>
@@ -140,7 +135,7 @@
             <i class="fa-solid fa-rotate-right" id="refresh-icon"></i>
             <span id="refresh-btn-text">Refresh Data</span>
         </button>
-        <div id="upload-status" class="text-[10px] text-center text-gray-500 mt-2 uppercase tracking-wider">Enter base URL and click Refresh</div>
+        <div id="upload-status" class="text-[10px] text-center text-gray-500 mt-2 uppercase tracking-wider">Click Refresh to load live data</div>
         <!-- Progress bar -->
         <div id="api-progress-bar" class="mt-2 hidden">
             <div class="w-full bg-gray-800 rounded-full h-1.5">
@@ -2969,21 +2964,17 @@ function apiJsonToCsv(json, reportId) {
 const API_PAGE_SIZE = 1000; // rows per request; raise/lower if the server has its own cap
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
+    const WORKER_PROXY = 'https://mautic-proxy.rajnarayanen1071.workers.dev';
     let start = 0;
     let allRows = [];
     let totalResults = Infinity;
     let firstPageJson = null;
 
     while (start < totalResults) {
-        const url = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
+        const targetUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
+        const url = `${WORKER_PROXY}/?url=${encodeURIComponent(targetUrl)}`;
 
-        const resp = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Basic cm5hcmF5YW5AYWx0YW1ldHJpY3MuY29tOnJuYXJheWFuQGFsdGFtZXRyaWNzLmNvbQ=='
-            }
-        });
+        const resp = await fetch(url, { method: 'GET' });
 
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status} for report ${reportId}`);
@@ -3034,16 +3025,14 @@ async function fetchSingleReportWithRetry(baseUrl, reportId, dateFrom, dateTo, m
 }
 
 async function fetchAllReports() {
-    const baseUrl  = (document.getElementById('api-base-url').value || '').trim().replace(/\/+$/, '');
+    const WORKER_PROXY = 'https://mautic-proxy.rajnarayanen1071.workers.dev';
+    const RA_BASE_URL  = 'https://g1.restaurantassociation.com';
     const dateFrom = document.getElementById('api-date-from').value || '2026-01-01';
     const dateToEl = document.getElementById('api-date-to');
     const dateTo   = dateToEl && dateToEl.value ? dateToEl.value : new Date().toISOString().slice(0, 10);
 
-    if (!baseUrl) {
-        const s = document.getElementById('upload-status');
-        s.textContent = '⚠ Please enter your Mautic base URL first';
-        s.style.color = '#fbbf24';
-        return;
+    function proxied(targetUrl) {
+        return `${WORKER_PROXY}/?url=${encodeURIComponent(targetUrl)}`;
     }
 
     // UI: loading state
@@ -3070,7 +3059,7 @@ async function fetchAllReports() {
         progText.textContent = `Fetching ${label}... (${i+1}/${REPORT_MAP.length})`;
         fill.style.width = ((i / REPORT_MAP.length) * 90) + '%';
         try {
-            const json = await fetchSingleReportWithRetry(baseUrl, id, dateFrom, dateTo);
+            const json = await fetchSingleReportWithRetry(RA_BASE_URL, id, dateFrom, dateTo);
             const csvText = apiJsonToCsv(json, id);
             // Feed into the correct parser (same as CSV upload path)
             switch (type) {
@@ -3137,25 +3126,16 @@ async function fetchAllReports() {
 
     // Hide progress bar after a moment
     setTimeout(() => { progress.classList.add('hidden'); fill.style.width = '0%'; }, 3000);
-
-    // Save base URL to localStorage for convenience
-    try { localStorage.setItem('mautic_base_url', baseUrl); } catch(e) {}
 }
 
-// Restore saved base URL on load
-(function restoreApiSettings() {
-    try {
-        const saved = localStorage.getItem('mautic_base_url');
-        if (saved) {
-            const el = document.getElementById('api-base-url');
-            if (el) el.value = saved;
-        }
-    } catch(e) {}
-    // Set today's date as default "Date To"
+// Set today's date as default "Date To" on load
+(function initDateDefaults() {
     try {
         const toEl = document.getElementById('api-date-to');
         if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
     } catch(e) {}
+    // Auto-fetch on page load
+    window.addEventListener('DOMContentLoaded', () => fetchAllReports());
 })();
 
 // ===== END MAUTIC API REFRESH SYSTEM =====
