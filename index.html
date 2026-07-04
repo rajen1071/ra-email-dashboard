@@ -2933,11 +2933,11 @@ function loadAppDataFromStorage() {
 // The API returns JSON with a "data" array where each element is an object
 // matching the CSV columns, so we convert it back to CSV text for the existing parsers.
 const REPORT_MAP = [
-    { id: 14, type: 'engagement', label: 'All Engagement' },
-    { id: 15, type: 'recipients', label: 'Sent Recipients' },
-    { id: 13, type: 'nurture',    label: 'Nurture Emails' },
-    { id: 12, type: 'newsletter', label: 'Newsletter' },
-    { id: 10, type: 'forms',      label: 'Form Submissions' }
+    { id: 14, type: 'engagement', label: 'All Engagement' },       // light
+    { id: 10, type: 'forms',      label: 'Form Submissions' },      // light
+    { id: 13, type: 'nurture',    label: 'Nurture Emails' },        // medium
+    { id: 12, type: 'newsletter', label: 'Newsletter' },            // medium
+    { id: 15, type: 'recipients', label: 'Sent Recipients' }        // heavy — last
 ];
 
 // The API returns raw DB-style field names (e_name, sent_count, unique_hits, ...)
@@ -2993,7 +2993,7 @@ function apiJsonToCsv(json, reportId) {
 // the true count. We must paginate using &limit=&start= until every row
 // has been collected, then merge all pages into a single { data: [...] }
 // object so the rest of the pipeline (apiJsonToCsv + parsers) is unchanged.
-const API_PAGE_SIZE = 1000; // rows per request; raise/lower if the server has its own cap
+const API_PAGE_SIZE = 5000; // larger pages = fewer round-trips = faster overall
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
@@ -3001,8 +3001,15 @@ async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     let allRows = [];
     let totalResults = Infinity;
     let firstPageJson = null;
+    const REPORT_TIMEOUT_MS = 60000; // 60 sec max per report
+    const startTime = Date.now();
 
     while (start < totalResults) {
+        if (Date.now() - startTime > REPORT_TIMEOUT_MS) {
+            console.warn(`Report ${reportId} timed out after ${REPORT_TIMEOUT_MS/1000}s — using ${allRows.length} rows fetched so far`);
+            break;
+        }
+
         const targetUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
         const url = `${WORKER_PROXY}/?url=${encodeURIComponent(targetUrl)}`;
 
@@ -3020,21 +3027,12 @@ async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
 
         totalResults = (json && typeof json.totalResults === 'number') ? json.totalResults : allRows.length;
 
-        // Safety valve: if the server ignores limit/start and keeps returning
-        // the same single row forever, stop instead of looping infinitely.
         if (rows.length === 0) break;
         start += rows.length;
 
-        // Small pause between pages so we don't hammer Mautic with dozens of
-        // requests back-to-back — some Mautic instances rate-limit/401 a client
-        // that fires 20+ requests in under a second, which looked like
-        // "sometimes data loads, sometimes it doesn't".
-        if (start < totalResults) await new Promise(r => setTimeout(r, 200));
+        if (start < totalResults) await new Promise(r => setTimeout(r, 50)); // reduced from 200ms
     }
 
-    // Return a json-shaped object with the merged rows, preserving any other
-    // top-level keys from the first page (dataColumns, report, etc.) in case
-    // they're useful elsewhere.
     return Object.assign({}, firstPageJson, { data: allRows, totalResults: allRows.length });
 }
 
