@@ -343,7 +343,7 @@
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center mb-3 pb-2 border-b border-gray-800">
                 <h3 class="text-sm font-semibold">Recipient Activity</h3>
-                <span class="text-[10px] text-gray-500 bg-gray-800/60 px-2 py-0.5 rounded ml-2">Sign Up</span>
+                <span class="text-[10px] text-gray-500 bg-gray-800/60 px-2 py-0.5 rounded ml-2">All Emails</span>
                 <span class="text-[10px] text-gray-500 ml-auto" id="home-rec-count">— contacts</span>
             </div>
             <div class="mb-3 flex gap-2">
@@ -1452,15 +1452,16 @@ function renderHome() {
     }
     // Home page Recipient Activity + Top Organisations — Sign Up recipients, from the
     // master Recipients CSV.
-    const homeRecipients = (typeof recipientsByCategory !== 'undefined') ? (recipientsByCategory['Sign Up'] || []) : [];
+    const homeRecipients = (typeof recipientsByCategory !== 'undefined')
+        ? Object.values(recipientsByCategory).flat()
+        : [];
     const homeRecCountEl = document.getElementById('home-rec-count');
-    if (homeRecCountEl) homeRecCountEl.textContent = homeRecipients.length + ' contacts';
+    if (homeRecCountEl) homeRecCountEl.textContent = homeRecipients.length.toLocaleString() + ' contacts';
     homeFiltered = homeRecipients.slice();
     homePage = 1;
     const hsrch = document.getElementById('homeSearchInput'); if (hsrch) hsrch.value = '';
     renderHomeRecipientTable();
-    renderHomeOrgs(homeRecipients);
-}
+    renderHomeOrgs(homeRecipients);}
 function pct(a,b){return b?((a/b)*100).toFixed(1)+'%':'0%';}
 
 // ===== Home page Recipient Activity (Sign Up) =====
@@ -1471,7 +1472,9 @@ const homePerPage = 12;
 function filterHomeRecipients() {
     const q = (document.getElementById('homeSearchInput').value || '').toLowerCase();
     const f = document.getElementById('homeFilterSel') ? document.getElementById('homeFilterSel').value : 'all';
-    const base = (typeof recipientsByCategory !== 'undefined') ? (recipientsByCategory['Sign Up'] || []) : [];
+    const base = (typeof recipientsByCategory !== 'undefined')
+        ? Object.values(recipientsByCategory).flat()
+        : [];
     homeFiltered = base.filter(r => {
         const mq = r.email.toLowerCase().includes(q);
         // Read/Clicked data isn't in the master Recipients CSV yet, so only "All"
@@ -2872,7 +2875,7 @@ function refreshCurrentPageAfterUpload() {
 // a successful "Refresh Data" run, and restore that snapshot on page load —
 // so the dashboard keeps showing the last fetched data until the user explicitly
 // clicks "Refresh Data" again (which overwrites the snapshot with fresh data).
-const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v1';
+const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v2';
 
 function saveAppDataToStorage() {
     try {
@@ -3001,7 +3004,7 @@ async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     let allRows = [];
     let totalResults = Infinity;
     let firstPageJson = null;
-    const REPORT_TIMEOUT_MS = 60000; // 60 sec max per report
+    const REPORT_TIMEOUT_MS = 300000; // 5 min max — report 15 has 238k+ rows, needs time
     const startTime = Date.now();
 
     while (start < totalResults) {
