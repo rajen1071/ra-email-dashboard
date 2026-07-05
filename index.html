@@ -3000,43 +3000,55 @@ const API_PAGE_SIZE = 5000; // larger pages = fewer round-trips = faster overall
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
-    let start = 0;
-    let allRows = [];
-    let totalResults = Infinity;
-    let firstPageJson = null;
-    const REPORT_TIMEOUT_MS = 300000; // 5 min max — report 15 has 238k+ rows, needs time
-    const startTime = Date.now();
 
-    while (start < totalResults) {
-        if (Date.now() - startTime > REPORT_TIMEOUT_MS) {
-            console.warn(`Report ${reportId} timed out after ${REPORT_TIMEOUT_MS/1000}s — using ${allRows.length} rows fetched so far`);
-            break;
-        }
-
+    async function fetchPage(start) {
         const targetUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
         const url = `${WORKER_PROXY}/?url=${encodeURIComponent(targetUrl)}`;
-
         const resp = await fetch(url, { method: 'GET' });
-
-        if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status} for report ${reportId}`);
-        }
-
-        const json = await resp.json();
-        if (!firstPageJson) firstPageJson = json;
-
-        const rows = (json && json.data) ? json.data : [];
-        allRows = allRows.concat(rows);
-
-        totalResults = (json && typeof json.totalResults === 'number') ? json.totalResults : allRows.length;
-
-        if (rows.length === 0) break;
-        start += rows.length;
-
-        if (start < totalResults) await new Promise(r => setTimeout(r, 50)); // reduced from 200ms
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId} at start=${start}`);
+        return await resp.json();
     }
 
-    return Object.assign({}, firstPageJson, { data: allRows, totalResults: allRows.length });
+    // Step 1: Fetch first page to get totalResults
+    const firstJson = await fetchPage(0);
+    const firstRows = (firstJson && firstJson.data) ? firstJson.data : [];
+    const totalResults = (firstJson && typeof firstJson.totalResults === 'number')
+        ? firstJson.totalResults : firstRows.length;
+
+    if (firstRows.length >= totalResults) {
+        return firstJson; // All data already in first page
+    }
+
+    // Step 2: Build all remaining page start positions
+    const remainingStarts = [];
+    for (let s = firstRows.length; s < totalResults; s += API_PAGE_SIZE) {
+        remainingStarts.push(s);
+    }
+
+    // Step 3: Fetch all remaining pages in parallel batches of 5
+    // (5 parallel = ~5x faster; conservative enough to not overload Mautic/Cloudflare)
+    const BATCH_SIZE = 5;
+    const pageResults = new Array(remainingStarts.length).fill([]);
+
+    for (let i = 0; i < remainingStarts.length; i += BATCH_SIZE) {
+        const batch = remainingStarts.slice(i, i + BATCH_SIZE);
+        const settled = await Promise.allSettled(
+            batch.map((start, bi) => fetchPage(start).then(json => ({
+                idx: i + bi,
+                rows: (json && json.data) ? json.data : []
+            })))
+        );
+        settled.forEach(result => {
+            if (result.status === 'fulfilled') {
+                pageResults[result.value.idx] = result.value.rows;
+            } else {
+                console.warn(`Report ${reportId} page failed:`, result.reason?.message);
+            }
+        });
+    }
+
+    const allRows = [...firstRows, ...pageResults.flat()];
+    return Object.assign({}, firstJson, { data: allRows, totalResults: allRows.length });
 }
 
 // Wraps fetchSingleReport with retries (with backoff) so a single transient
