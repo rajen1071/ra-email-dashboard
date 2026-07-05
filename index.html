@@ -1683,7 +1683,7 @@ function parseRecipientsCSV(text) {
 
     // Mautic returns these as 0/1 (or blank) — normalize to the 'Yes'/'No'
     // strings the rest of the UI (badges, filters) already expects.
-    const toYesNo = v => (v === '1' || v === '1.0' || /^true$/i.test(v || '')) ? 'Yes' : 'No';
+    const toYesNo = v => (parseInt(v) > 0 || /^true$/i.test(v || '')) ? 'Yes' : 'No';
 
     const nameToCategory = {};
     Object.keys(categoryToEngagementName).forEach(cat => {
@@ -2950,7 +2950,7 @@ const REPORT_FIELD_LABELS = {
     12: { e_name: 'Name', sent_count: 'Sent Count', read_count: 'Read Count', unique_hits: 'Unique Clicks', bounced: 'Bounced', unsubscribed: 'Unsubscribed' },
     13: { e_name: 'Name', sent_count: 'Sent Count', read_count: 'Read Count', read_ratio: 'Read Ratio', unique_hits: 'Unique Clicks', unique_ratio: 'Clicks Ratio', bounced: 'Bounced', bounced_ratio: 'Bounced Ratio' },
     14: { e_name: 'Name', sent_count: 'Sent Count', read_count: 'Read Count', unique_hits: 'Unique Clicks', bounced: 'Bounced', unsubscribed: 'Unsubscribed' },
-    15: { e_name: 'Name', email: 'Contact Contact Primary Email', date_sent: 'Date Sent', is_read: 'Read', is_hit: 'Clicked', hits: 'Clicked' }
+    15: { e_name: 'Name', email: 'Contact Contact Primary Email', date_sent: 'Date Sent', is_read: 'Read', is_hit: 'Clicked', hits: 'Clicked', unique_hits: 'Clicked' }
 };
 
 // Convert Mautic API JSON response to CSV text so existing parsers can handle it.
