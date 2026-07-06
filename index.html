@@ -1280,6 +1280,19 @@
         </div>
     </div>
 
+    <!-- Top Organisations -->
+    <div class="card-bg p-5 rounded-xl mt-4">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+            <h3 class="text-sm font-semibold flex items-center gap-2">
+                <i class="fa-solid fa-building text-amber-400 text-xs"></i> Top Organisations
+            </h3>
+            <span class="text-[10px] text-gray-500">By email domain — top 15</span>
+        </div>
+        <div id="reg-top-org" class="space-y-1.5">
+            <p class="text-[11px] text-gray-600">No data yet — load recipients first.</p>
+        </div>
+    </div>
+
 </div><!-- end page-registration -->
 
 <script>
@@ -2275,7 +2288,8 @@ function parseFormsCSV(text) {
     const allRows = splitCSVRows(text.trim());
     if (allRows.length < 2) return;
     const headers = allRows[0].map(h => h.trim().toLowerCase());
-    const nameIdx = headers.findIndex(h => h === 'name');
+    const nameIdx  = headers.findIndex(h => h === 'name');
+    const emailIdx = headers.findIndex(h => h === 'email');
     if (nameIdx === -1) return;
 
     // Reset all submission counts to 0 before recounting
@@ -2284,6 +2298,12 @@ function parseFormsCSV(text) {
     for (let i = 1; i < allRows.length; i++) {
         const rawName = (allRows[i][nameIdx] || '').trim();
         if (!rawName) continue;
+
+        // Only count rows with a valid email — Report 10 includes empty-email
+        // rows (e.g. test/bot submissions) which inflate the count if included.
+        const emailVal = emailIdx >= 0 ? (allRows[i][emailIdx] || '').trim() : '';
+        if (!emailVal || !emailVal.includes('@')) continue;
+
         const category = mapFormNameToCategory(rawName);
         if (category && regData[category]) {
             regData[category].submissions += 1;
@@ -2367,6 +2387,31 @@ function showRegistration(name) {
     regPage = 1;
     const srch=document.getElementById('regSearchInput'); if(srch) srch.value='';
     filterRegRecipients();
+
+    // Top Organisations — compute domain counts from this category's recipient list
+    const regOrgEl = document.getElementById('reg-top-org');
+    if (regOrgEl) {
+        if (!recipientRows.length) {
+            regOrgEl.innerHTML = '<p class="text-[11px] text-gray-600">No recipients data yet.</p>';
+        } else {
+            const domainCount = {};
+            recipientRows.forEach(r => {
+                const d = (r.email || '').split('@')[1];
+                if (d) domainCount[d] = (domainCount[d] || 0) + 1;
+            });
+            const top = Object.entries(domainCount).sort((a,b) => b[1]-a[1]).slice(0, 15);
+            const maxCount = top[0] ? top[0][1] : 1;
+            regOrgEl.innerHTML = top.map(([domain, count], i) => `
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-gray-500 w-5 text-right">${i+1}</span>
+                    <div class="flex-1 bg-gray-800 rounded overflow-hidden h-5 relative">
+                        <div class="h-5 rounded" style="width:${Math.max(4,(count/maxCount*100)).toFixed(1)}%;background:rgba(245,158,11,0.35);"></div>
+                        <span class="absolute inset-0 flex items-center px-2 text-[10px] text-gray-200 font-mono">${domain}</span>
+                    </div>
+                    <span class="text-[10px] text-amber-400 font-bold w-8 text-right">${count}</span>
+                </div>`).join('');
+        }
+    }
 }
 
 function filterRegRecipients() {
