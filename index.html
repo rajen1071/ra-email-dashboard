@@ -1240,57 +1240,62 @@
         </div>
     </div>
 
-    <!-- Recipient Activity -->
-    <div class="card-bg p-5 rounded-xl">
-        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-            <h3 class="text-sm font-semibold">Recipient Activity</h3>
-            <span class="text-[10px] text-gray-500" id="reg-rec-count">— contacts</span>
-        </div>
-        <div class="mb-3 flex gap-2">
-            <div class="relative flex-1">
-                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                <input id="regSearchInput" type="text" placeholder="Search email..." oninput="filterRegRecipients()"
-                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-            </div>
-            <select id="regFilterSel" onchange="filterRegRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                <option value="all">All</option>
-                <option value="opened">Opened</option>
-                <option value="not_opened">Not Opened</option>
-                <option value="clicked">Clicked</option>
-            </select>
-        </div>
-        <div class="overflow-y-auto style-scrollbar" style="max-height:260px;">
-            <table class="w-full text-[11px] text-left">
-                <thead class="sticky top-0 bg-[#1a1d26]">
-                    <tr class="text-blue-400 border-b border-gray-800">
-                        <th class="pb-2 font-semibold">EMAIL</th>
-                        <th class="pb-2 font-semibold text-center">SENT</th>
-                        <th class="pb-2 font-semibold text-center">READ</th>
-                    </tr>
-                </thead>
-                <tbody id="regRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-            </table>
-        </div>
-        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-            <span id="regPageInfo" class="text-[10px] text-gray-500"></span>
-            <div class="flex gap-1">
-                <button onclick="regPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                <button onclick="regNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-            </div>
-        </div>
-    </div>
+    <!-- Recipient Activity + Top Organisations — side by side -->
+    <div class="grid grid-cols-2 gap-4">
 
-    <!-- Top Organisations -->
-    <div class="card-bg p-5 rounded-xl mt-4">
-        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-            <h3 class="text-sm font-semibold flex items-center gap-2">
-                <i class="fa-solid fa-building text-amber-400 text-xs"></i> Top Organisations
-            </h3>
-            <span class="text-[10px] text-gray-500">By email domain — top 15</span>
+        <!-- Recipient Activity -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
+                <span class="text-[10px] text-gray-500" id="reg-rec-count">— contacts</span>
+            </div>
+            <div class="mb-3 flex gap-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                    <input id="regSearchInput" type="text" placeholder="Search email..." oninput="filterRegRecipients()"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+                </div>
+                <select id="regFilterSel" onchange="filterRegRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                    <option value="all">All</option>
+                    <option value="opened">Opened</option>
+                    <option value="not_opened">Not Opened</option>
+                    <option value="clicked">Clicked</option>
+                </select>
+            </div>
+            <div class="overflow-y-auto style-scrollbar" style="max-height:260px;">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="sticky top-0 bg-[#1a1d26]">
+                        <tr class="text-blue-400 border-b border-gray-800">
+                            <th class="pb-2 font-semibold">EMAIL</th>
+                            <th class="pb-2 font-semibold text-center">SENT</th>
+                            <th class="pb-2 font-semibold text-center">READ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="regRecipientBody" class="divide-y divide-gray-800/30"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+                <span id="regPageInfo" class="text-[10px] text-gray-500"></span>
+                <div class="flex gap-1">
+                    <button onclick="regPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button onclick="regNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
         </div>
-        <div id="reg-top-org" class="space-y-1.5">
-            <p class="text-[11px] text-gray-600">No data yet — load recipients first.</p>
+
+        <!-- Top Organisations -->
+        <div class="card-bg p-5 rounded-xl">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+                <h3 class="text-sm font-semibold flex items-center gap-2">
+                    <i class="fa-solid fa-building text-amber-400 text-xs"></i> Top Organisations
+                </h3>
+                <span class="text-[10px] text-gray-500">By email domain — top 15</span>
+            </div>
+            <div id="reg-top-org" class="space-y-1.5 overflow-y-auto style-scrollbar" style="max-height:340px;">
+                <p class="text-[11px] text-gray-600">No data yet — load recipients first.</p>
+            </div>
         </div>
+
     </div>
 
 </div><!-- end page-registration -->
