@@ -3315,14 +3315,7 @@ async function fetchAllReports() {
         if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
     } catch(e) {}
     // Auto-fetch on page load
-    window.addEventListener('DOMContentLoaded', () => {
-        fetchAllReports();
-        // If user opened a direct URL with a hash, navigate there after load
-        if (window.location.hash && window.location.hash !== '#home') {
-            // Wait for DOM to be ready, then navigate
-            setTimeout(() => navigateToHash(window.location.hash), 300);
-        }
-    });
+    window.addEventListener('DOMContentLoaded', () => fetchAllReports());
 })();
 
 // ===== END MAUTIC API REFRESH SYSTEM =====
@@ -3504,7 +3497,15 @@ function renderSignupKPIs() {
 }
 
 // ===== INIT =====
-window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); renderNLList(); if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0); renderNurturing(); });
+window.addEventListener('load', () => {
+    loadAppDataFromStorage();
+    // Respect the URL hash on page load — navigate to the right section
+    // instead of always resetting to home. Falls back to home if no hash.
+    navigateToHash(window.location.hash);
+    renderNLList();
+    if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0);
+    renderNurturing();
+});
 </script>
 
 <!-- ===== NEWSLETTER PAGE ===== -->
