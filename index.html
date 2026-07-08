@@ -1328,14 +1328,17 @@ function showPage(pageId, navId) {
     }
 }
 function showHome() {
+    history.pushState(null, '', '#home');
     showPage('page-home', null);
     renderHome();
 }
 function showNurturing() {
+    history.pushState(null, '', '#nurturing');
     showPage('page-nurturing', 'nav-nurturing');
     renderNurturing();
 }
 function showNewsletter() {
+    history.pushState(null, '', '#newsletter');
     showPage('page-newsletter', 'nav-newsletter');
     renderNLList();
     if (nlWeeks.length) selectNLWeek(0);
@@ -1345,17 +1348,67 @@ function _showCategoryInternal(catName) {
     document.getElementById('nav-email').classList.add('active');
 }
 function showCategory(catName) {
+    const slug = catName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    history.pushState(null, '', `#category-${slug}`);
     showPage('page-category', null);
     document.getElementById('nav-email').classList.add('active');
     _renderCategory(catName);
 }
 function showEventOccur(name, tag, color) {
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    history.pushState(null, '', `#event-${slug}`);
     showPage('page-eventoccur', 'nav-eventoccur');
     _renderEventOccur(name, tag, color);
 }
 function showRegistration(name) {
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    history.pushState(null, '', `#form-${slug}`);
     _showRegistration(name);
 }
+
+// Hash → navigation mapping
+function navigateToHash(hash) {
+    hash = (hash || '').replace('#', '');
+    if (!hash || hash === 'home') { showPage('page-home', null); renderHome(); return; }
+    if (hash === 'nurturing')     { showPage('page-nurturing','nav-nurturing'); renderNurturing(); return; }
+    if (hash === 'newsletter')    { showPage('page-newsletter','nav-newsletter'); renderNLList(); if(nlWeeks.length) selectNLWeek(0); return; }
+    if (hash.startsWith('category-')) {
+        const slug = hash.replace('category-', '');
+        const catMap = {
+            'sign-up':'Sign Up','follow-up-email':'Follow Up Email','news':'News',
+            'resources':'Resources','jobs':'Jobs','contact-us':'Contact Us',
+            'chomp-show':'Chomp Show','blog':'Blog','academy':'Academy',
+            'form-submission-email':'Form Submission Email','internal-email':'Internal Email'
+        };
+        const cat = catMap[slug];
+        if (cat) { showPage('page-category',null); document.getElementById('nav-email').classList.add('active'); _renderCategory(cat); }
+        return;
+    }
+    if (hash.startsWith('event-')) {
+        const slug = hash.replace('event-', '');
+        const eoMap = {
+            'sign-up':['Sign Up','Sign_Up','pink'],'news':['News','interest_news','blue'],
+            'blog':['Blog','interest_topics','amber'],'chomp-show':['Chomp Show','interest_chomp_show','indigo'],
+            'academy':['Academy','interest_training','orange'],'jobs':['Jobs','interest_jobs','emerald'],
+            'contact-us':['Contact Us','intent_contact','purple'],'benefits':['Benefits','req_benefits','teal']
+        };
+        const eo = eoMap[slug];
+        if (eo) { showPage('page-eventoccur','nav-eventoccur'); _renderEventOccur(...eo); }
+        return;
+    }
+    if (hash.startsWith('form-')) {
+        const slug = hash.replace('form-', '');
+        const formMap = {
+            'sign-up':'Sign Up','contact-us':'Contact Us','chomp-show':'Chomp Show',
+            'jobs':'Jobs','job-applied':'Job Applied'
+        };
+        const form = formMap[slug];
+        if (form) _showRegistration(form);
+        return;
+    }
+}
+
+window.addEventListener('popstate', () => navigateToHash(window.location.hash));
 
 // Fills the home page from csvData (the uploaded tag_emails CSV).
 // Only Sign Up has real data right now. "Hits" (page visits) and "Tags Assigned"
@@ -1769,34 +1822,6 @@ function parseRecipientsCSV(text) {
     recipientsByNewsletter = groupedNL;
 }
 
-// After recipients are parsed (per-contact rows from Report 15),
-// compute aggregate engagement stats for each category so the
-// category page KPI cards (Emails Sent, Unique Opens, Unique Clicks, etc.)
-// are populated. This replaces the pre-aggregated Report 14 approach which
-// didn't work because Report 14 also returns per-contact rows.
-function computeEngagementFromRecipients() {
-    Object.entries(categoryToEngagementName).forEach(([cat]) => {
-        const rows = recipientsByCategory[cat] || [];
-        if (!rows.length) return;
-        const sent      = rows.length;
-        const read      = rows.filter(r => r.read === 'Yes').length;
-        const clicked   = rows.filter(r => r.clicked === 'Yes').length;
-        const notOpened = sent - read;
-        const existing  = engagementData[cat] || {};
-        engagementData[cat] = {
-            ...existing,
-            sent,
-            read,
-            clicked,
-            notOpened,
-            bounced:      existing.bounced      || 0,
-            unsubscribed: existing.unsubscribed  || 0,
-            open_rate:    sent > 0 ? +((read    / sent) * 100).toFixed(1) : 0,
-            click_rate:   sent > 0 ? +((clicked / sent) * 100).toFixed(1) : 0
-        };
-    });
-}
-
 function handleRecipientsCSVUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1818,7 +1843,6 @@ let catPage = 1;
 const catPerPage = 12;
 
 function _renderCategory(catName) {
-    currentCategory = catName; // MUST be set first — filterCatRecipients() and refreshCurrentPageAfterUpload() both depend on this
     Object.values(catNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
     const navEl = document.getElementById(catNavIds[catName]);
     if(navEl) navEl.classList.add('active');
@@ -2718,12 +2742,14 @@ function renderNLList() {
         const notOpen   = w.sent - w.read;
         return `
         <div onclick="selectNLWeek(${i})" id="nl-row-${i}"
-            class="flex items-center px-3 py-2.5 rounded-lg cursor-pointer transition hover:bg-gray-800/40 gap-3"
+            class="flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition hover:bg-gray-800/40"
             style="${i===nlSelectedWeek?'background:rgba(232,83,58,0.12); border-left:2px solid #e8533a;':'border-left:2px solid transparent;'}">
-            <i class="fa-solid fa-newspaper text-[10px] flex-shrink-0" style="color:${i===nlSelectedWeek?'#e8533a':'#6b7280'};"></i>
-            <span class="text-xs font-semibold flex-1 truncate" style="color:${i===nlSelectedWeek?'#e8533a':'#d1d5db'};min-width:0;">${w.label}</span>
-            <div class="flex items-center gap-3 text-[10px] flex-shrink-0 whitespace-nowrap">
-                <span class="text-gray-400">Sent: <strong class="text-white">${(w.sent||'—').toLocaleString ? (w.sent||0).toLocaleString() : (w.sent||'—')}</strong></span>
+            <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-newspaper text-[10px]" style="color:${i===nlSelectedWeek?'#e8533a':'#6b7280'};"></i>
+                <span class="text-xs font-semibold" style="color:${i===nlSelectedWeek?'#e8533a':'#d1d5db'};">${w.label}</span>
+            </div>
+            <div class="flex items-center gap-4 text-[10px]">
+                <span class="text-gray-400">Sent: <strong class="text-white">${w.sent||'—'}</strong></span>
                 <span class="text-gray-400">Read: <strong class="text-emerald-400">${w.read||'—'}</strong></span>
                 <span class="text-gray-400">Click: <strong class="text-purple-400">${w.clicked||'—'}</strong></span>
                 <span class="text-gray-400">Open: <strong class="text-amber-400">${openRate}</strong></span>
@@ -2905,7 +2931,7 @@ function handleAnyCSVUpload(event) {
                     case 'nurture':    parseNurtureCSV(text); break;
                     case 'forms':      parseFormsCSV(text); break;
                     case 'engagement': parseEngagementCSV(text); break;
-                    case 'recipients': parseRecipientsCSV(text); computeEngagementFromRecipients(); break;
+                    case 'recipients': parseRecipientsCSV(text); break;
                     default: throw new Error('Unrecognized CSV format');
                 }
                 results.push({ name: file.name, type, ok: true });
@@ -3008,9 +3034,6 @@ function loadAppDataFromStorage() {
         if (snap.nurturingData)          nurturingData = snap.nurturingData;
         if (snap.nlWeeks)                nlWeeks = snap.nlWeeks;
         if (snap.nlGroupRows)            nlGroupRows = snap.nlGroupRows;
-        // Always recompute engagement from recipients — ensures category KPI cards
-        // are correct even when loaded from localStorage cache.
-        computeEngagementFromRecipients();
         if (snap.regSubmissions) {
             Object.keys(snap.regSubmissions).forEach(k => {
                 if (regData[k]) regData[k].submissions = snap.regSubmissions[k];
@@ -3221,7 +3244,8 @@ async function fetchAllReports() {
             const csvText = apiJsonToCsv(json, id);
             switch (type) {
                 case 'engagement': parseEngagementCSV(csvText); break;
-                case 'recipients': parseRecipientsCSV(csvText); computeEngagementFromRecipients(); break;                case 'nurture':    parseNurtureCSV(csvText);    break;
+                case 'recipients': parseRecipientsCSV(csvText); break;
+                case 'nurture':    parseNurtureCSV(csvText);    break;
                 case 'newsletter': parseNewsletterCSV(csvText); break;
                 case 'forms':      parseFormsCSV(csvText);      break;
             }
@@ -3291,7 +3315,14 @@ async function fetchAllReports() {
         if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
     } catch(e) {}
     // Auto-fetch on page load
-    window.addEventListener('DOMContentLoaded', () => fetchAllReports());
+    window.addEventListener('DOMContentLoaded', () => {
+        fetchAllReports();
+        // If user opened a direct URL with a hash, navigate there after load
+        if (window.location.hash && window.location.hash !== '#home') {
+            // Wait for DOM to be ready, then navigate
+            setTimeout(() => navigateToHash(window.location.hash), 300);
+        }
+    });
 })();
 
 // ===== END MAUTIC API REFRESH SYSTEM =====
@@ -3473,13 +3504,7 @@ function renderSignupKPIs() {
 }
 
 // ===== INIT =====
-window.addEventListener('load', () => {
-    loadAppDataFromStorage();
-    showHome();
-    renderNLList();
-    if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0);
-    renderNurturing();
-});
+window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); renderNLList(); if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0); renderNurturing(); });
 </script>
 
 <!-- ===== NEWSLETTER PAGE ===== -->
