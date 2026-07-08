@@ -1328,17 +1328,14 @@ function showPage(pageId, navId) {
     }
 }
 function showHome() {
-    history.pushState(null, '', '#home');
     showPage('page-home', null);
     renderHome();
 }
 function showNurturing() {
-    history.pushState(null, '', '#nurturing');
     showPage('page-nurturing', 'nav-nurturing');
     renderNurturing();
 }
 function showNewsletter() {
-    history.pushState(null, '', '#newsletter');
     showPage('page-newsletter', 'nav-newsletter');
     renderNLList();
     if (nlWeeks.length) selectNLWeek(0);
@@ -1348,70 +1345,17 @@ function _showCategoryInternal(catName) {
     document.getElementById('nav-email').classList.add('active');
 }
 function showCategory(catName) {
-    const slug = catName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    history.pushState(null, '', `#category-${slug}`);
     showPage('page-category', null);
     document.getElementById('nav-email').classList.add('active');
     _renderCategory(catName);
 }
 function showEventOccur(name, tag, color) {
-    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    history.pushState(null, '', `#event-${slug}`);
     showPage('page-eventoccur', 'nav-eventoccur');
     _renderEventOccur(name, tag, color);
 }
 function showRegistration(name) {
-    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    history.pushState(null, '', `#form-${slug}`);
     _showRegistration(name);
 }
-
-// Hash → navigation mapping
-function navigateToHash(hash) {
-    hash = (hash || '').replace('#', '');
-    if (!hash || hash === 'home') { showPage('page-home', null); renderHome(); return; }
-    if (hash === 'nurturing')     { showPage('page-nurturing','nav-nurturing'); renderNurturing(); return; }
-    if (hash === 'newsletter')    { showPage('page-newsletter','nav-newsletter'); renderNLList(); if(nlWeeks.length) selectNLWeek(0); return; }
-    if (hash.startsWith('category-')) {
-        const slug = hash.replace('category-', '');
-        const catMap = {
-            'sign-up':'Sign Up','follow-up-email':'Follow Up Email','news':'News',
-            'resources':'Resources','jobs':'Jobs','contact-us':'Contact Us',
-            'chomp-show':'Chomp Show','blog':'Blog','academy':'Academy',
-            'form-submission-email':'Form Submission Email','internal-email':'Internal Email'
-        };
-        const cat = catMap[slug];
-        // Call showCategory (not _renderCategory directly) so currentCategory gets set,
-        // which lets refreshCurrentPageAfterUpload() correctly re-render after data loads.
-        if (cat) showCategory(cat);
-        return;
-    }
-    if (hash.startsWith('event-')) {
-        const slug = hash.replace('event-', '');
-        const eoMap = {
-            'sign-up':['Sign Up','Sign_Up','pink'],'news':['News','interest_news','blue'],
-            'blog':['Blog','interest_topics','amber'],'chomp-show':['Chomp Show','interest_chomp_show','indigo'],
-            'academy':['Academy','interest_training','orange'],'jobs':['Jobs','interest_jobs','emerald'],
-            'contact-us':['Contact Us','intent_contact','purple'],'benefits':['Benefits','req_benefits','teal']
-        };
-        const eo = eoMap[slug];
-        if (eo) { showPage('page-eventoccur','nav-eventoccur'); _renderEventOccur(...eo); }
-        return;
-    }
-    if (hash.startsWith('form-')) {
-        const slug = hash.replace('form-', '');
-        const formMap = {
-            'sign-up':'Sign Up','contact-us':'Contact Us','chomp-show':'Chomp Show',
-            'jobs':'Jobs','job-applied':'Job Applied'
-        };
-        const form = formMap[slug];
-        // Call showRegistration (not _showRegistration) so currentRegName gets set.
-        if (form) showRegistration(form);
-        return;
-    }
-}
-
-window.addEventListener('popstate', () => navigateToHash(window.location.hash));
 
 // Fills the home page from csvData (the uploaded tag_emails CSV).
 // Only Sign Up has real data right now. "Hits" (page visits) and "Tags Assigned"
@@ -3531,9 +3475,7 @@ function renderSignupKPIs() {
 // ===== INIT =====
 window.addEventListener('load', () => {
     loadAppDataFromStorage();
-    // Respect the URL hash on page load — navigate to the right section
-    // instead of always resetting to home. Falls back to home if no hash.
-    navigateToHash(window.location.hash);
+    showHome();
     renderNLList();
     if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0);
     renderNurturing();
