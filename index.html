@@ -1381,7 +1381,9 @@ function navigateToHash(hash) {
             'form-submission-email':'Form Submission Email','internal-email':'Internal Email'
         };
         const cat = catMap[slug];
-        if (cat) { showPage('page-category',null); document.getElementById('nav-email').classList.add('active'); _renderCategory(cat); }
+        // Call showCategory (not _renderCategory directly) so currentCategory gets set,
+        // which lets refreshCurrentPageAfterUpload() correctly re-render after data loads.
+        if (cat) showCategory(cat);
         return;
     }
     if (hash.startsWith('event-')) {
@@ -1403,7 +1405,8 @@ function navigateToHash(hash) {
             'jobs':'Jobs','job-applied':'Job Applied'
         };
         const form = formMap[slug];
-        if (form) _showRegistration(form);
+        // Call showRegistration (not _showRegistration) so currentRegName gets set.
+        if (form) showRegistration(form);
         return;
     }
 }
@@ -1871,6 +1874,7 @@ let catPage = 1;
 const catPerPage = 12;
 
 function _renderCategory(catName) {
+    currentCategory = catName; // MUST be set first — filterCatRecipients() and refreshCurrentPageAfterUpload() both depend on this
     Object.values(catNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
     const navEl = document.getElementById(catNavIds[catName]);
     if(navEl) navEl.classList.add('active');
