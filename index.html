@@ -3065,30 +3065,47 @@ function apiJsonToCsv(json, reportId) {
 // the true count. We must paginate using &limit=&start= until every row
 // has been collected, then merge all pages into a single { data: [...] }
 // object so the rest of the pipeline (apiJsonToCsv + parsers) is unchanged.
-const API_PAGE_SIZE = 5000; // larger pages = fewer round-trips = faster overall
+const API_PAGE_SIZE = 5000;
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
-
     function proxied(u) { return `${WORKER_PROXY}/?url=${encodeURIComponent(u)}`; }
 
-    // Step 1: probe with limit=1 to get totalResults without fetching all rows
-    const probeUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=1&start=0`;
-    const probeResp = await fetch(proxied(probeUrl), { method: 'GET' });
-    if (!probeResp.ok) throw new Error(`HTTP ${probeResp.status} for report ${reportId}`);
-    const probeJson = await probeResp.json();
-    const totalResults = (probeJson && typeof probeJson.totalResults === 'number')
-        ? probeJson.totalResults : 10000;
+    let start = 0;
+    let allRows = [];
+    let totalResults = Infinity;
+    let firstJson = null;
 
-    // Step 2: fetch ALL rows in a single request using the known total count.
-    // The API's `start` parameter doesn't reliably paginate (returns same rows
-    // repeatedly), so we avoid multi-page fetching entirely.
-    const fetchLimit = Math.min(totalResults + 100, 500000);
-    const fullUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${fetchLimit}&start=0`;
-    const resp = await fetch(proxied(fullUrl), { method: 'GET' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId}`);
-    const json = await resp.json();
-    return json;
+    while (start < totalResults) {
+        const url = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
+        const resp = await fetch(proxied(url), { method: 'GET' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId}`);
+        const json = await resp.json();
+
+        if (!firstJson) firstJson = json;
+
+        const rows = (json && json.data) ? json.data : [];
+        if (rows.length === 0) break; // no more data
+
+        // Duplicate detection: if page 2+ returns same first row as page 1, start is broken
+        if (start > 0 && allRows.length > 0 && rows[0] && allRows[0]) {
+            const firstRowStr = JSON.stringify(rows[0]);
+            const prevFirstStr = JSON.stringify(allRows[0]);
+            if (firstRowStr === prevFirstStr) {
+                // start param not working — use what we have
+                console.warn(`Report ${reportId}: start param not working, using ${allRows.length} rows`);
+                break;
+            }
+        }
+
+        allRows = allRows.concat(rows);
+        totalResults = (typeof json.totalResults === 'number') ? json.totalResults : allRows.length;
+        start += rows.length;
+
+        if (start < totalResults) await new Promise(r => setTimeout(r, 100));
+    }
+
+    return Object.assign({}, firstJson, { data: allRows });
 }
 
 // Wraps fetchSingleReport with retries (with backoff) so a single transient
