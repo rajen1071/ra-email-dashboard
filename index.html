@@ -2406,14 +2406,14 @@ function showRegistration(name) {
             });
             const top = Object.entries(domainCount).sort((a,b) => b[1]-a[1]).slice(0, 15);
             const maxCount = top[0] ? top[0][1] : 1;
-            const colors = ['#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa','#fb923c','#4ade80','#38bdf8','#f472b6','#818cf8','#22d3ee','#facc15','#a3e635','#e879f9','#fb7185'];
             regOrgEl.innerHTML = top.map(([domain, count], i) => `
-                <div class="flex items-center gap-3">
-                    <span class="text-[11px] text-gray-300 truncate" style="width:130px;flex-shrink:0;">${domain}</span>
-                    <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden">
-                        <div class="h-full rounded-full" style="width:${Math.max(4,(count/maxCount*100)).toFixed(1)}%;background:${colors[i % colors.length]};"></div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-gray-500 w-5 text-right">${i+1}</span>
+                    <div class="flex-1 bg-gray-800 rounded overflow-hidden h-5 relative">
+                        <div class="h-5 rounded" style="width:${Math.max(4,(count/maxCount*100)).toFixed(1)}%;background:rgba(245,158,11,0.35);"></div>
+                        <span class="absolute inset-0 flex items-center px-2 text-[10px] text-gray-200 font-mono">${domain}</span>
                     </div>
-                    <span class="text-[11px] font-semibold text-gray-200" style="width:28px;text-align:right;flex-shrink:0;">${count}</span>
+                    <span class="text-[10px] text-amber-400 font-bold w-8 text-right">${count}</span>
                 </div>`).join('');
         }
     }
@@ -3065,47 +3065,30 @@ function apiJsonToCsv(json, reportId) {
 // the true count. We must paginate using &limit=&start= until every row
 // has been collected, then merge all pages into a single { data: [...] }
 // object so the rest of the pipeline (apiJsonToCsv + parsers) is unchanged.
-const API_PAGE_SIZE = 5000;
+const API_PAGE_SIZE = 5000; // larger pages = fewer round-trips = faster overall
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
+
     function proxied(u) { return `${WORKER_PROXY}/?url=${encodeURIComponent(u)}`; }
 
-    let start = 0;
-    let allRows = [];
-    let totalResults = Infinity;
-    let firstJson = null;
+    // Step 1: probe with limit=1 to get totalResults without fetching all rows
+    const probeUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=1&start=0`;
+    const probeResp = await fetch(proxied(probeUrl), { method: 'GET' });
+    if (!probeResp.ok) throw new Error(`HTTP ${probeResp.status} for report ${reportId}`);
+    const probeJson = await probeResp.json();
+    const totalResults = (probeJson && typeof probeJson.totalResults === 'number')
+        ? probeJson.totalResults : 10000;
 
-    while (start < totalResults) {
-        const url = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
-        const resp = await fetch(proxied(url), { method: 'GET' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId}`);
-        const json = await resp.json();
-
-        if (!firstJson) firstJson = json;
-
-        const rows = (json && json.data) ? json.data : [];
-        if (rows.length === 0) break; // no more data
-
-        // Duplicate detection: if page 2+ returns same first row as page 1, start is broken
-        if (start > 0 && allRows.length > 0 && rows[0] && allRows[0]) {
-            const firstRowStr = JSON.stringify(rows[0]);
-            const prevFirstStr = JSON.stringify(allRows[0]);
-            if (firstRowStr === prevFirstStr) {
-                // start param not working — use what we have
-                console.warn(`Report ${reportId}: start param not working, using ${allRows.length} rows`);
-                break;
-            }
-        }
-
-        allRows = allRows.concat(rows);
-        totalResults = (typeof json.totalResults === 'number') ? json.totalResults : allRows.length;
-        start += rows.length;
-
-        if (start < totalResults) await new Promise(r => setTimeout(r, 100));
-    }
-
-    return Object.assign({}, firstJson, { data: allRows });
+    // Step 2: fetch ALL rows in a single request using the known total count.
+    // The API's `start` parameter doesn't reliably paginate (returns same rows
+    // repeatedly), so we avoid multi-page fetching entirely.
+    const fetchLimit = Math.min(totalResults + 100, 500000);
+    const fullUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${fetchLimit}&start=0`;
+    const resp = await fetch(proxied(fullUrl), { method: 'GET' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId}`);
+    const json = await resp.json();
+    return json;
 }
 
 // Wraps fetchSingleReport with retries (with backoff) so a single transient
