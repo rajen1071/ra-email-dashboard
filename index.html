@@ -1320,95 +1320,14 @@ function showPage(pageId, navId) {
     const pg = document.getElementById(pageId);
     if(pg) {
         pg.classList.add('visible');
-        pg.scrollTop = 0;
+        pg.scrollTop = 0; // scroll to top on page switch
     }
     if(navId) {
         const nv = document.getElementById(navId);
         if(nv) nv.classList.add('active');
     }
 }
-function showHome() {
-    history.pushState(null, '', '#home');
-    showPage('page-home', null);
-    renderHome();
-}
-function showNurturing() {
-    history.pushState(null, '', '#nurturing');
-    showPage('page-nurturing', 'nav-nurturing');
-    renderNurturing();
-}
-function showNewsletter() {
-    history.pushState(null, '', '#newsletter');
-    showPage('page-newsletter', 'nav-newsletter');
-    renderNLList();
-    if (nlWeeks.length) selectNLWeek(0);
-}
-function _showCategoryInternal(catName) {
-    showPage('page-category', null);
-    document.getElementById('nav-email').classList.add('active');
-}
-function showCategory(catName) {
-    const slug = catName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    history.pushState(null, '', `#category-${slug}`);
-    showPage('page-category', null);
-    document.getElementById('nav-email').classList.add('active');
-    _renderCategory(catName);
-}
-function showEventOccur(name, tag, color) {
-    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    history.pushState(null, '', `#event-${slug}`);
-    showPage('page-eventoccur', 'nav-eventoccur');
-    _renderEventOccur(name, tag, color);
-}
-function showRegistration(name) {
-    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    history.pushState(null, '', `#form-${slug}`);
-    _showRegistration(name);
-}
-
-// Hash → navigation mapping
-function navigateToHash(hash) {
-    hash = (hash || '').replace('#', '');
-    if (!hash || hash === 'home') { showPage('page-home', null); renderHome(); return; }
-    if (hash === 'nurturing')     { showPage('page-nurturing','nav-nurturing'); renderNurturing(); return; }
-    if (hash === 'newsletter')    { showPage('page-newsletter','nav-newsletter'); renderNLList(); if(nlWeeks.length) selectNLWeek(0); return; }
-    if (hash.startsWith('category-')) {
-        const slug = hash.replace('category-', '');
-        const catMap = {
-            'sign-up':'Sign Up','follow-up-email':'Follow Up Email','news':'News',
-            'resources':'Resources','jobs':'Jobs','contact-us':'Contact Us',
-            'chomp-show':'Chomp Show','blog':'Blog','academy':'Academy',
-            'form-submission-email':'Form Submission Email','internal-email':'Internal Email'
-        };
-        const cat = catMap[slug];
-        if (cat) { showPage('page-category',null); document.getElementById('nav-email').classList.add('active'); _renderCategory(cat); }
-        return;
-    }
-    if (hash.startsWith('event-')) {
-        const slug = hash.replace('event-', '');
-        const eoMap = {
-            'sign-up':['Sign Up','Sign_Up','pink'],'news':['News','interest_news','blue'],
-            'blog':['Blog','interest_topics','amber'],'chomp-show':['Chomp Show','interest_chomp_show','indigo'],
-            'academy':['Academy','interest_training','orange'],'jobs':['Jobs','interest_jobs','emerald'],
-            'contact-us':['Contact Us','intent_contact','purple'],'benefits':['Benefits','req_benefits','teal']
-        };
-        const eo = eoMap[slug];
-        if (eo) { showPage('page-eventoccur','nav-eventoccur'); _renderEventOccur(...eo); }
-        return;
-    }
-    if (hash.startsWith('form-')) {
-        const slug = hash.replace('form-', '');
-        const formMap = {
-            'sign-up':'Sign Up','contact-us':'Contact Us','chomp-show':'Chomp Show',
-            'jobs':'Jobs','job-applied':'Job Applied'
-        };
-        const form = formMap[slug];
-        if (form) _showRegistration(form);
-        return;
-    }
-}
-
-window.addEventListener('popstate', () => navigateToHash(window.location.hash));
+function showHome()     { showPage('page-home', null); renderHome(); }
 
 // Fills the home page from csvData (the uploaded tag_emails CSV).
 // Only Sign Up has real data right now. "Hits" (page visits) and "Tags Assigned"
@@ -1646,6 +1565,7 @@ function renderHomeOrgs(rows) {
 // redirects to the new "Sign Up" entry under Email By Category, since the old standalone
 // Sign Up page is no longer in the sidebar.
 function showSignUp() { showCategory('Sign Up'); }
+function showNurturing(){ showPage('page-nurturing','nav-nurturing'); renderNurturing(); }
 
 // ===== UNIFIED SIDEBAR ACCORDION (only one open at a time) =====
 const sidebarSections = ['emailcat', 'registration']; // 'eventoccur' temporarily removed (commented out in sidebar above)
@@ -1822,6 +1742,31 @@ function parseRecipientsCSV(text) {
     recipientsByNewsletter = groupedNL;
 }
 
+// Compute engagement totals (home page KPIs) directly from
+// the per-contact Report 15 data that is already in
+// recipientsByCategory — this is more accurate than Report 14.
+function computeEngagementFromRecipients() {
+    Object.keys(categoryToEngagementName).forEach(cat => {
+        const rows = recipientsByCategory[cat] || [];
+        if (!rows.length) return;
+        const sent      = rows.length;
+        const read      = rows.filter(r => r.read === 'Yes').length;
+        const clicked   = rows.filter(r => r.clicked === 'Yes').length;
+        const existing  = engagementData[cat] || {};
+        engagementData[cat] = {
+            ...existing,
+            sent,
+            read,
+            clicked,
+            notOpened:    sent - read,
+            bounced:      existing.bounced      || 0,
+            unsubscribed: existing.unsubscribed || 0,
+            open_rate:    sent > 0 ? +((read    / sent) * 100).toFixed(1) : 0,
+            click_rate:   sent > 0 ? +((clicked / sent) * 100).toFixed(1) : 0
+        };
+    });
+}
+
 function handleRecipientsCSVUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1829,6 +1774,7 @@ function handleRecipientsCSVUpload(event) {
     reader.onload = function(e) {
         try {
             parseRecipientsCSV(e.target.result);
+            computeEngagementFromRecipients();
             refreshCurrentPageAfterUpload();
         } catch(err) {
             console.error('Recipients CSV parse error:', err);
@@ -1842,7 +1788,9 @@ let catFiltered = [];
 let catPage = 1;
 const catPerPage = 12;
 
-function _renderCategory(catName) {
+function showCategory(catName) {
+    currentCategory = catName;
+    // clear sub-nav active states
     Object.values(catNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
     const navEl = document.getElementById(catNavIds[catName]);
     if(navEl) navEl.classList.add('active');
@@ -2399,7 +2347,7 @@ let regPage = 1;
 const regPerPage = 12;
 let currentRegName = '';
 
-function _showRegistration(name) {
+function showRegistration(name) {
     currentRegName = name;
     Object.values(regNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
     const el = document.getElementById(regNavIds[name]);
@@ -2483,16 +2431,16 @@ function _showRegistration(name) {
                 if (d) domainCount[d] = (domainCount[d] || 0) + 1;
             });
             const top = Object.entries(domainCount).sort((a,b) => b[1]-a[1]).slice(0, 15);
-            const colors = ["#60a5fa","#34d399","#f87171","#fbbf24","#a78bfa","#fb923c","#4ade80","#38bdf8","#f472b6","#818cf8","#22d3ee","#facc15","#a3e635","#e879f9","#fb7185"];
             const maxCount = top[0] ? top[0][1] : 1;
-            regOrgEl.innerHTML = top.map(([domain, count], i) => {
-                const w = Math.max(4, (count / maxCount) * 100);
-                return `<div class="flex items-center gap-3">
+            const colors = ['#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa','#fb923c','#4ade80','#38bdf8','#f472b6','#818cf8','#22d3ee','#facc15','#a3e635','#e879f9','#fb7185'];
+            regOrgEl.innerHTML = top.map(([domain, count], i) => `
+                <div class="flex items-center gap-3">
                     <span class="text-[11px] text-gray-300 truncate" style="width:130px;flex-shrink:0;">${domain}</span>
-                    <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${w}%;background:${colors[i % colors.length]};"></div></div>
+                    <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full" style="width:${Math.max(4,(count/maxCount*100)).toFixed(1)}%;background:${colors[i % colors.length]};"></div>
+                    </div>
                     <span class="text-[11px] font-semibold text-gray-200" style="width:28px;text-align:right;flex-shrink:0;">${count}</span>
-                </div>`;
-            }).join('');
+                </div>`).join('');
         }
     }
 }
@@ -2562,7 +2510,7 @@ let eoPage = 1;
 const eoPerPage = 12;
 let currentEOTab = 'analytics';
 
-function _renderEventOccur(name, tag, color) {
+function showEventOccur(name, tag, color) {
     Object.values(eoNavIds).forEach(id => { const el=document.getElementById(id); if(el) el.classList.remove('active'); });
     const navEl = document.getElementById(eoNavIds[name]);
     if(navEl) navEl.classList.add('active');
@@ -2727,6 +2675,12 @@ let nlSelectedWeek = 0;
 let nlFiltered = [];
 let nlPage = 1;
 const nlPerPage = 12;
+
+function showNewsletter() {
+    showPage('page-newsletter', 'nav-newsletter');
+    renderNLList();
+    selectNLWeek(0);
+}
 
 function renderNLList() {
     const countEl = document.getElementById('nl-weeks-count');
@@ -3039,6 +2993,8 @@ function loadAppDataFromStorage() {
                 if (regData[k]) regData[k].submissions = snap.regSubmissions[k];
             });
         }
+        // Recompute engagement from recipients so home page KPIs are always accurate
+        computeEngagementFromRecipients();
 
         const status = document.getElementById('upload-status');
         if (status && snap.savedAt) {
@@ -3137,30 +3093,47 @@ function apiJsonToCsv(json, reportId) {
 // the true count. We must paginate using &limit=&start= until every row
 // has been collected, then merge all pages into a single { data: [...] }
 // object so the rest of the pipeline (apiJsonToCsv + parsers) is unchanged.
-const API_PAGE_SIZE = 5000; // larger pages = fewer round-trips = faster overall
+const API_PAGE_SIZE = 5000;
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
-
     function proxied(u) { return `${WORKER_PROXY}/?url=${encodeURIComponent(u)}`; }
 
-    // Step 1: probe with limit=1 to get totalResults without fetching all rows
-    const probeUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=1&start=0`;
-    const probeResp = await fetch(proxied(probeUrl), { method: 'GET' });
-    if (!probeResp.ok) throw new Error(`HTTP ${probeResp.status} for report ${reportId}`);
-    const probeJson = await probeResp.json();
-    const totalResults = (probeJson && typeof probeJson.totalResults === 'number')
-        ? probeJson.totalResults : 10000;
+    let start = 0;
+    let allRows = [];
+    let totalResults = Infinity;
+    let firstJson = null;
 
-    // Step 2: fetch ALL rows in a single request using the known total count.
-    // The API's `start` parameter doesn't reliably paginate (returns same rows
-    // repeatedly), so we avoid multi-page fetching entirely.
-    const fetchLimit = Math.min(totalResults + 100, 500000);
-    const fullUrl = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${fetchLimit}&start=0`;
-    const resp = await fetch(proxied(fullUrl), { method: 'GET' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId}`);
-    const json = await resp.json();
-    return json;
+    while (start < totalResults) {
+        const url = `${baseUrl}/api/reports/${reportId}?dateFrom=${dateFrom}&dateTo=${dateTo}&limit=${API_PAGE_SIZE}&start=${start}`;
+        const resp = await fetch(proxied(url), { method: 'GET' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} for report ${reportId}`);
+        const json = await resp.json();
+
+        if (!firstJson) firstJson = json;
+
+        const rows = (json && json.data) ? json.data : [];
+        if (rows.length === 0) break; // no more data
+
+        // Duplicate detection: if page 2+ returns same first row as page 1, start is broken
+        if (start > 0 && allRows.length > 0 && rows[0] && allRows[0]) {
+            const firstRowStr = JSON.stringify(rows[0]);
+            const prevFirstStr = JSON.stringify(allRows[0]);
+            if (firstRowStr === prevFirstStr) {
+                // start param not working — use what we have
+                console.warn(`Report ${reportId}: start param not working, using ${allRows.length} rows`);
+                break;
+            }
+        }
+
+        allRows = allRows.concat(rows);
+        totalResults = (typeof json.totalResults === 'number') ? json.totalResults : allRows.length;
+        start += rows.length;
+
+        if (start < totalResults) await new Promise(r => setTimeout(r, 100));
+    }
+
+    return Object.assign({}, firstJson, { data: allRows });
 }
 
 // Wraps fetchSingleReport with retries (with backoff) so a single transient
@@ -3244,7 +3217,7 @@ async function fetchAllReports() {
             const csvText = apiJsonToCsv(json, id);
             switch (type) {
                 case 'engagement': parseEngagementCSV(csvText); break;
-                case 'recipients': parseRecipientsCSV(csvText); break;
+                case 'recipients': parseRecipientsCSV(csvText); computeEngagementFromRecipients(); break;
                 case 'nurture':    parseNurtureCSV(csvText);    break;
                 case 'newsletter': parseNewsletterCSV(csvText); break;
                 case 'forms':      parseFormsCSV(csvText);      break;
@@ -3315,14 +3288,7 @@ async function fetchAllReports() {
         if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
     } catch(e) {}
     // Auto-fetch on page load
-    window.addEventListener('DOMContentLoaded', () => {
-        fetchAllReports();
-        // If user opened a direct URL with a hash, navigate there after load
-        if (window.location.hash && window.location.hash !== '#home') {
-            // Wait for DOM to be ready, then navigate
-            setTimeout(() => navigateToHash(window.location.hash), 300);
-        }
-    });
+    window.addEventListener('DOMContentLoaded', () => fetchAllReports());
 })();
 
 // ===== END MAUTIC API REFRESH SYSTEM =====
