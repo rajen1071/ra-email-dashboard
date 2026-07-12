@@ -1835,6 +1835,24 @@ function processRecipientsJson(rows) {
     recipientsByCategory = groupedCat;
     recipientsByNewsletter = groupedNL;
     totalEmailRecipients = totalCount;
+
+    // ===== DEBUG: verify classification after every live fetch =====
+    // Open browser DevTools > Console (F12) after clicking "Refresh Data" to see
+    // this. If a category shows 0 recipient_rows, check the sample e_name values
+    // logged below — that exact string needs to match categoryToEngagementName.
+    try {
+        console.group('%cReport 15 classification check', 'color:#e8533a;font-weight:bold;');
+        console.log('Total recipient rows:', totalCount);
+        console.table(Object.keys(categoryToEngagementName).map(cat => ({
+            category: cat,
+            expected_e_name: categoryToEngagementName[cat],
+            recipient_rows: (groupedCat[cat] || []).length
+        })));
+        const nlKeys = Object.keys(groupedNL);
+        console.log(`Newsletter/unrecognized buckets: ${nlKeys.length} distinct e_name values, ${nlKeys.reduce((s,k)=>s+groupedNL[k].length,0)} rows total`);
+        console.log('Sample of those e_name values with counts (first 15):', nlKeys.slice(0, 15).map(k => `${k} (${groupedNL[k].length})`));
+        console.groupEnd();
+    } catch (e) { /* debug logging must never break the app */ }
 }
 
 function handleRecipientsCSVUpload(event) {
@@ -3021,7 +3039,10 @@ function refreshCurrentPageAfterUpload() {
 // a successful "Refresh Data" run, and restore that snapshot on page load —
 // so the dashboard keeps showing the last fetched data until the user explicitly
 // clicks "Refresh Data" again (which overwrites the snapshot with fresh data).
-const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v2';
+// v3: bumped after the category/newsletter classification fix below, so any
+// stale snapshot saved by an earlier (buggy) version of this dashboard is
+// automatically ignored instead of being restored and shown as if current.
+const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v3';
 
 function saveAppDataToStorage() {
     try {
