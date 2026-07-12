@@ -1711,6 +1711,32 @@ function normalizeEName(name) {
     return (name || '').replace(/\s+/g, ' ').trim();
 }
 
+// Some Mautic exports prefix e_name with a numeric campaign/email ID
+// (e.g. "30000 2026.07.08 - Restaurant Association Newsletter" — the "30000 "
+// is the ID, not part of the actual campaign name). If category sends carry
+// the same kind of numeric prefix, an exact-string compare against
+// categoryToEngagementName would NEVER match. Stripping any leading
+// "<digits><space>" before comparing makes matching immune to that.
+function stripLeadingId(name) {
+    return normalizeEName(name).replace(/^\d+\s+/, '');
+}
+
+// Resolves a raw e_name to its category display name. Tries, in order:
+//   1) exact match (after ID-prefix strip + whitespace/case normalization)
+//   2) the expected category e_name appearing anywhere inside rawName
+//      (handles extra prefixes/suffixes Mautic might add)
+// Returns null if rawName doesn't correspond to any known category.
+function matchCategoryFromEName(rawName, categoryToEngagementNameMap) {
+    const cleaned = stripLeadingId(rawName).toLowerCase();
+    if (!cleaned) return null;
+    for (const cat of Object.keys(categoryToEngagementNameMap)) {
+        const expected = stripLeadingId(categoryToEngagementNameMap[cat]).toLowerCase();
+        if (!expected) continue;
+        if (cleaned === expected || cleaned.includes(expected)) return cat;
+    }
+    return null;
+}
+
 function parseRecipientsCSV(text) {
     const allRows = splitCSVRows(text.trim());
     if (allRows.length < 2) { recipientsByCategory = {}; recipientsByNewsletter = {}; return; }
@@ -1729,13 +1755,8 @@ function parseRecipientsCSV(text) {
     // strings the rest of the UI (badges, filters) already expects.
     const toYesNo = v => (parseInt(v) > 0 || /^true$/i.test(v || '')) ? 'Yes' : 'No';
 
-    // Case-insensitive, whitespace-normalized lookup so minor formatting
-    // differences in the Mautic export (extra spaces, stray casing) never
-    // cause a category row to be misclassified as a newsletter row.
-    const nameToCategory = {};
-    Object.keys(categoryToEngagementName).forEach(cat => {
-        nameToCategory[normalizeEName(categoryToEngagementName[cat]).toLowerCase()] = cat;
-    });
+    // Robust matching (handles numeric ID prefixes + extra whitespace/casing) —
+    // see matchCategoryFromEName().
 
     const groupedCat = {};
     const groupedNL = {};
@@ -1753,7 +1774,7 @@ function parseRecipientsCSV(text) {
         const read = readIdx > -1 ? toYesNo((cols[readIdx] || '').trim()) : null;
         const clicked = clickedIdx > -1 ? toYesNo((cols[clickedIdx] || '').trim()) : null;
 
-        const category = nameToCategory[normalizeEName(rawName).toLowerCase()];
+        const category = matchCategoryFromEName(rawName, categoryToEngagementName);
         if (category) {
             if (!groupedCat[category]) groupedCat[category] = [];
             groupedCat[category].push({ email, sent, read, clicked });
@@ -1794,16 +1815,12 @@ function computeEngagementFromRecipients() {
 
 // Direct JSON processor for Report 15 — skips CSV roundtrip.
 function processRecipientsJson(rows) {
-    // Case-insensitive, whitespace-normalized lookup — see normalizeEName().
-    // Without this, any stray casing/space difference between the Mautic
-    // e_name value and our categoryToEngagementName list makes the row fall
-    // through to the newsletter bucket, which is what caused every recipient
-    // (category emails included) to show up only under Newsletter.
-    const nameToCategory = {};
-    Object.keys(categoryToEngagementName).forEach(cat => {
-        nameToCategory[normalizeEName(categoryToEngagementName[cat]).toLowerCase()] = cat;
-    });
-
+    // Robust matching (handles numeric ID prefixes + extra whitespace/casing) —
+    // see matchCategoryFromEName(). Without this, any stray prefix/casing/space
+    // difference between the Mautic e_name value and our categoryToEngagementName
+    // list makes the row fall through to the newsletter bucket, which is what
+    // caused every recipient (category emails included) to show up only under
+    // Newsletter.
     const groupedCat = {};
     const groupedNL  = {};
     let totalCount = 0;
@@ -1818,7 +1835,7 @@ function processRecipientsJson(rows) {
         const read    = parseInt(r.is_read)    === 1 ? 'Yes' : 'No';
         const clicked = parseInt(r.unique_hits) >  0 ? 'Yes' : 'No';
 
-        const category = nameToCategory[normalizeEName(rawName).toLowerCase()];
+        const category = matchCategoryFromEName(rawName, categoryToEngagementName);
         if (category) {
             if (!groupedCat[category]) groupedCat[category] = [];
             groupedCat[category].push({ email, sent, read, clicked });
@@ -3039,10 +3056,9 @@ function refreshCurrentPageAfterUpload() {
 // a successful "Refresh Data" run, and restore that snapshot on page load —
 // so the dashboard keeps showing the last fetched data until the user explicitly
 // clicks "Refresh Data" again (which overwrites the snapshot with fresh data).
-// v3: bumped after the category/newsletter classification fix below, so any
-// stale snapshot saved by an earlier (buggy) version of this dashboard is
-// automatically ignored instead of being restored and shown as if current.
-const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v3';
+// v4: bumped after adding ID-prefix-safe substring category matching, so any
+// stale snapshot from an earlier version is automatically ignored.
+const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v4';
 
 function saveAppDataToStorage() {
     try {
