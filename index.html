@@ -186,12 +186,7 @@
         <h1 class="text-xl font-bold">Sign Up</h1>
     </div>
 
-    <div class="grid grid-cols-8 gap-3 mb-8">
-        <div class="card-bg p-3.5 rounded-xl border-t-4 border-orange-500">
-            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Email Recipients</p>
-            <p class="text-xl font-bold mt-1 orange-text" id="home-kpi-recipients">—</p>
-            <p class="text-[9px] text-gray-500 mt-0.5">Total recipients (Report 15)</p>
-        </div>
+    <div class="grid grid-cols-7 gap-3 mb-8">
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-blue-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
             <p class="text-xl font-bold mt-1 text-blue-400" id="home-kpi-sent">—</p>
@@ -347,7 +342,7 @@
         <!-- Recipient Activity -->
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Email Recipients</h3>
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
                 <span class="text-[10px] text-gray-500 bg-gray-800/60 px-2 py-0.5 rounded ml-2">All Emails</span>
                 <span class="text-[10px] text-gray-500 ml-auto" id="home-rec-count">— contacts</span>
             </div>
@@ -559,7 +554,7 @@
         <!-- Recipient Activity -->
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Email Recipients</h3>
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
                 <span class="text-[10px] text-gray-500" id="su-contact-count">— contacts</span>
             </div>
             <div class="mb-3 flex gap-2">
@@ -883,7 +878,7 @@
         <!-- Recipient Activity -->
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Email Recipients</h3>
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
                 <span class="text-[10px] text-gray-500" id="cat-recipient-count">— contacts</span>
             </div>
             <div class="mb-3 flex gap-2">
@@ -1082,7 +1077,7 @@
     <!-- Recipient Activity -->
     <div class="card-bg p-5 rounded-xl">
         <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-            <h3 class="text-sm font-semibold">Email Recipients</h3>
+            <h3 class="text-sm font-semibold">Recipient Activity</h3>
             <span class="text-[10px] text-gray-500" id="eo-rec-count">— contacts</span>
         </div>
         <div class="mb-3 flex gap-2">
@@ -1251,7 +1246,7 @@
         <!-- Recipient Activity -->
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Email Recipients</h3>
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
                 <span class="text-[10px] text-gray-500" id="reg-rec-count">— contacts</span>
             </div>
             <div class="mb-3 flex gap-2">
@@ -1341,13 +1336,6 @@ function showHome()     { showPage('page-home', null); renderHome(); }
 // stay "—" here rather than being filled with email numbers.
 function renderHome() {
     const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
-
-    // Email Recipients KPI — total rows returned by Report 15 across every
-    // e_name (all 11 categories + every newsletter send date), after full
-    // pagination. This is the true "total recipients" number (e.g. 324,457),
-    // not just whichever category happens to be selected.
-    set('home-kpi-recipients', (typeof totalEmailRecipients !== 'undefined' && totalEmailRecipients > 0)
-        ? totalEmailRecipients.toLocaleString() : '—');
 
     // Top 7 KPI cards now reflect the "Sign Up" category from the All-Engagement CSV
     const su = engagementData['Sign Up'];
@@ -1699,43 +1687,6 @@ function handleEngagementCSVUpload(event) {
 // not whether they opened/clicked it.
 let recipientsByCategory = {};  // category display name -> [{email, sent}]
 let recipientsByNewsletter = {}; // newsletter campaign label (matches nlWeeks[i].label) -> [{email, sent}]
-// Total recipient rows returned by Report 15 across ALL e_name values (category
-// sends + every newsletter send combined), after full pagination. Drives the
-// "Email Recipients" KPI card on the homepage.
-let totalEmailRecipients = 0;
-
-// Normalizes an e_name value for matching: trims whitespace and collapses
-// internal double-spaces so minor formatting differences from the Mautic API
-// don't cause a category row to fall through into the newsletter bucket.
-function normalizeEName(name) {
-    return (name || '').replace(/\s+/g, ' ').trim();
-}
-
-// Some Mautic exports prefix e_name with a numeric campaign/email ID
-// (e.g. "30000 2026.07.08 - Restaurant Association Newsletter" — the "30000 "
-// is the ID, not part of the actual campaign name). If category sends carry
-// the same kind of numeric prefix, an exact-string compare against
-// categoryToEngagementName would NEVER match. Stripping any leading
-// "<digits><space>" before comparing makes matching immune to that.
-function stripLeadingId(name) {
-    return normalizeEName(name).replace(/^\d+\s+/, '');
-}
-
-// Resolves a raw e_name to its category display name. Tries, in order:
-//   1) exact match (after ID-prefix strip + whitespace/case normalization)
-//   2) the expected category e_name appearing anywhere inside rawName
-//      (handles extra prefixes/suffixes Mautic might add)
-// Returns null if rawName doesn't correspond to any known category.
-function matchCategoryFromEName(rawName, categoryToEngagementNameMap) {
-    const cleaned = stripLeadingId(rawName).toLowerCase();
-    if (!cleaned) return null;
-    for (const cat of Object.keys(categoryToEngagementNameMap)) {
-        const expected = stripLeadingId(categoryToEngagementNameMap[cat]).toLowerCase();
-        if (!expected) continue;
-        if (cleaned === expected || cleaned.includes(expected)) return cat;
-    }
-    return null;
-}
 
 function parseRecipientsCSV(text) {
     const allRows = splitCSVRows(text.trim());
@@ -1755,18 +1706,18 @@ function parseRecipientsCSV(text) {
     // strings the rest of the UI (badges, filters) already expects.
     const toYesNo = v => (parseInt(v) > 0 || /^true$/i.test(v || '')) ? 'Yes' : 'No';
 
-    // Robust matching (handles numeric ID prefixes + extra whitespace/casing) —
-    // see matchCategoryFromEName().
+    const nameToCategory = {};
+    Object.keys(categoryToEngagementName).forEach(cat => {
+        nameToCategory[categoryToEngagementName[cat]] = cat;
+    });
 
     const groupedCat = {};
     const groupedNL = {};
-    let totalCount = 0;
     for (let i = 1; i < allRows.length; i++) {
         const cols = allRows[i];
         const rawName = (cols[nameIdx] || '').trim();
         const email = (cols[emailIdx] || '').trim();
         if (!rawName || !email) continue;
-        totalCount++;
         const sent = (cols[sentIdx] || '').trim();
         // null (not 'No') when the column genuinely isn't in the API response —
         // report 15 doesn't currently expose is_read/is_hit, so until a Mautic
@@ -1774,22 +1725,21 @@ function parseRecipientsCSV(text) {
         const read = readIdx > -1 ? toYesNo((cols[readIdx] || '').trim()) : null;
         const clicked = clickedIdx > -1 ? toYesNo((cols[clickedIdx] || '').trim()) : null;
 
-        const category = matchCategoryFromEName(rawName, categoryToEngagementName);
+        const category = nameToCategory[rawName];
         if (category) {
             if (!groupedCat[category]) groupedCat[category] = [];
             groupedCat[category].push({ email, sent, read, clicked });
             continue;
         }
-        // Not a known category — bucket under its own raw e_name (this covers
-        // every "... Restaurant Association Newsletter" campaign, and safely
-        // keeps anything else unrecognized too so totalEmailRecipients always
-        // reconciles with the sum of every bucket).
-        if (!groupedNL[rawName]) groupedNL[rawName] = [];
-        groupedNL[rawName].push({ email, sent, read, clicked });
+        // Not a known category — check if it's a newsletter campaign row instead.
+        if (/newsletter/i.test(rawName)) {
+            if (!groupedNL[rawName]) groupedNL[rawName] = [];
+            groupedNL[rawName].push({ email, sent, read, clicked });
+        }
+        // Otherwise unrecognized — skip.
     }
     recipientsByCategory = groupedCat;
     recipientsByNewsletter = groupedNL;
-    totalEmailRecipients = totalCount;
 }
 
 // Compute engagement totals (home page KPIs) directly from
@@ -1815,61 +1765,37 @@ function computeEngagementFromRecipients() {
 
 // Direct JSON processor for Report 15 — skips CSV roundtrip.
 function processRecipientsJson(rows) {
-    // Robust matching (handles numeric ID prefixes + extra whitespace/casing) —
-    // see matchCategoryFromEName(). Without this, any stray prefix/casing/space
-    // difference between the Mautic e_name value and our categoryToEngagementName
-    // list makes the row fall through to the newsletter bucket, which is what
-    // caused every recipient (category emails included) to show up only under
-    // Newsletter.
+    const nameToCategory = {};
+    Object.keys(categoryToEngagementName).forEach(cat => {
+        nameToCategory[categoryToEngagementName[cat]] = cat;
+    });
+
     const groupedCat = {};
     const groupedNL  = {};
-    let totalCount = 0;
 
     rows.forEach(r => {
         const rawName = (r.e_name || '').trim();
         const email   = (r.email   || '').trim();
         if (!rawName || !email) return;
-        totalCount++;
 
         const sent    = (r.date_sent || '').trim();
         const read    = parseInt(r.is_read)    === 1 ? 'Yes' : 'No';
         const clicked = parseInt(r.unique_hits) >  0 ? 'Yes' : 'No';
 
-        const category = matchCategoryFromEName(rawName, categoryToEngagementName);
+        const category = nameToCategory[rawName];
         if (category) {
             if (!groupedCat[category]) groupedCat[category] = [];
             groupedCat[category].push({ email, sent, read, clicked });
             return;
         }
-        // Not a recognized category e_name — group under its own newsletter
-        // campaign label (works for "... Restaurant Association Newsletter"
-        // rows and also safely buckets anything else unrecognized so no data
-        // is silently dropped, while categories above are never touched).
-        if (!groupedNL[rawName]) groupedNL[rawName] = [];
-        groupedNL[rawName].push({ email, sent, read, clicked });
+        if (/newsletter/i.test(rawName)) {
+            if (!groupedNL[rawName]) groupedNL[rawName] = [];
+            groupedNL[rawName].push({ email, sent, read, clicked });
+        }
     });
 
     recipientsByCategory = groupedCat;
     recipientsByNewsletter = groupedNL;
-    totalEmailRecipients = totalCount;
-
-    // ===== DEBUG: verify classification after every live fetch =====
-    // Open browser DevTools > Console (F12) after clicking "Refresh Data" to see
-    // this. If a category shows 0 recipient_rows, check the sample e_name values
-    // logged below — that exact string needs to match categoryToEngagementName.
-    try {
-        console.group('%cReport 15 classification check', 'color:#e8533a;font-weight:bold;');
-        console.log('Total recipient rows:', totalCount);
-        console.table(Object.keys(categoryToEngagementName).map(cat => ({
-            category: cat,
-            expected_e_name: categoryToEngagementName[cat],
-            recipient_rows: (groupedCat[cat] || []).length
-        })));
-        const nlKeys = Object.keys(groupedNL);
-        console.log(`Newsletter/unrecognized buckets: ${nlKeys.length} distinct e_name values, ${nlKeys.reduce((s,k)=>s+groupedNL[k].length,0)} rows total`);
-        console.log('Sample of those e_name values with counts (first 15):', nlKeys.slice(0, 15).map(k => `${k} (${groupedNL[k].length})`));
-        console.groupEnd();
-    } catch (e) { /* debug logging must never break the app */ }
 }
 
 function handleRecipientsCSVUpload(event) {
@@ -3056,9 +2982,7 @@ function refreshCurrentPageAfterUpload() {
 // a successful "Refresh Data" run, and restore that snapshot on page load —
 // so the dashboard keeps showing the last fetched data until the user explicitly
 // clicks "Refresh Data" again (which overwrites the snapshot with fresh data).
-// v4: bumped after adding ID-prefix-safe substring category matching, so any
-// stale snapshot from an earlier version is automatically ignored.
-const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v4';
+const APP_DATA_STORAGE_KEY = 'ra_dashboard_data_v2';
 
 function saveAppDataToStorage() {
     try {
@@ -3668,7 +3592,7 @@ window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); re
         <!-- Recipient Table -->
         <div class="card-bg p-5 rounded-xl">
             <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Email Recipients</h3>
+                <h3 class="text-sm font-semibold">Recipient Activity</h3>
                 <span class="text-[10px] text-gray-500" id="nl-rec-count">— contacts</span>
             </div>
             <div class="mb-3 flex gap-2">
