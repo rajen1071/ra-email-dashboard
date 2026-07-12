@@ -1743,21 +1743,17 @@ function parseRecipientsCSV(text) {
 }
 
 // Compute engagement totals (home page KPIs) directly from
-// the per-contact Report 15 data that is already in
-// recipientsByCategory — this is more accurate than Report 14.
+// the per-contact Report 15 data already in recipientsByCategory.
 function computeEngagementFromRecipients() {
     Object.keys(categoryToEngagementName).forEach(cat => {
         const rows = recipientsByCategory[cat] || [];
         if (!rows.length) return;
-        const sent      = rows.length;
-        const read      = rows.filter(r => r.read === 'Yes').length;
-        const clicked   = rows.filter(r => r.clicked === 'Yes').length;
-        const existing  = engagementData[cat] || {};
+        const sent    = rows.length;
+        const read    = rows.filter(r => r.read    === 'Yes').length;
+        const clicked = rows.filter(r => r.clicked === 'Yes').length;
+        const existing = engagementData[cat] || {};
         engagementData[cat] = {
-            ...existing,
-            sent,
-            read,
-            clicked,
+            ...existing, sent, read, clicked,
             notOpened:    sent - read,
             bounced:      existing.bounced      || 0,
             unsubscribed: existing.unsubscribed || 0,
@@ -1765,6 +1761,41 @@ function computeEngagementFromRecipients() {
             click_rate:   sent > 0 ? +((clicked / sent) * 100).toFixed(1) : 0
         };
     });
+}
+
+// Direct JSON processor for Report 15 — skips CSV roundtrip.
+function processRecipientsJson(rows) {
+    const nameToCategory = {};
+    Object.keys(categoryToEngagementName).forEach(cat => {
+        nameToCategory[categoryToEngagementName[cat]] = cat;
+    });
+
+    const groupedCat = {};
+    const groupedNL  = {};
+
+    rows.forEach(r => {
+        const rawName = (r.e_name || '').trim();
+        const email   = (r.email   || '').trim();
+        if (!rawName || !email) return;
+
+        const sent    = (r.date_sent || '').trim();
+        const read    = parseInt(r.is_read)    === 1 ? 'Yes' : 'No';
+        const clicked = parseInt(r.unique_hits) >  0 ? 'Yes' : 'No';
+
+        const category = nameToCategory[rawName];
+        if (category) {
+            if (!groupedCat[category]) groupedCat[category] = [];
+            groupedCat[category].push({ email, sent, read, clicked });
+            return;
+        }
+        if (/newsletter/i.test(rawName)) {
+            if (!groupedNL[rawName]) groupedNL[rawName] = [];
+            groupedNL[rawName].push({ email, sent, read, clicked });
+        }
+    });
+
+    recipientsByCategory = groupedCat;
+    recipientsByNewsletter = groupedNL;
 }
 
 function handleRecipientsCSVUpload(event) {
@@ -3093,7 +3124,7 @@ function apiJsonToCsv(json, reportId) {
 // the true count. We must paginate using &limit=&start= until every row
 // has been collected, then merge all pages into a single { data: [...] }
 // object so the rest of the pipeline (apiJsonToCsv + parsers) is unchanged.
-const API_PAGE_SIZE = 5000;
+const API_PAGE_SIZE = 10000;
 
 async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
     const WORKER_PROXY = 'https://mautic-proxy-ra.rajnarayanen1071.workers.dev';
@@ -3113,27 +3144,16 @@ async function fetchSingleReport(baseUrl, reportId, dateFrom, dateTo) {
         if (!firstJson) firstJson = json;
 
         const rows = (json && json.data) ? json.data : [];
-        if (rows.length === 0) break; // no more data
-
-        // Duplicate detection: if page 2+ returns same first row as page 1, start is broken
-        if (start > 0 && allRows.length > 0 && rows[0] && allRows[0]) {
-            const firstRowStr = JSON.stringify(rows[0]);
-            const prevFirstStr = JSON.stringify(allRows[0]);
-            if (firstRowStr === prevFirstStr) {
-                // start param not working — use what we have
-                console.warn(`Report ${reportId}: start param not working, using ${allRows.length} rows`);
-                break;
-            }
-        }
+        if (rows.length === 0) break;
 
         allRows = allRows.concat(rows);
         totalResults = (typeof json.totalResults === 'number') ? json.totalResults : allRows.length;
         start += rows.length;
 
-        if (start < totalResults) await new Promise(r => setTimeout(r, 100));
+        if (start < totalResults) await new Promise(r => setTimeout(r, 50));
     }
 
-    return Object.assign({}, firstJson, { data: allRows });
+    return { ...(firstJson || {}), data: allRows };
 }
 
 // Wraps fetchSingleReport with retries (with backoff) so a single transient
@@ -3217,7 +3237,10 @@ async function fetchAllReports() {
             const csvText = apiJsonToCsv(json, id);
             switch (type) {
                 case 'engagement': parseEngagementCSV(csvText); break;
-                case 'recipients': parseRecipientsCSV(csvText); computeEngagementFromRecipients(); break;
+                case 'recipients':
+                    processRecipientsJson(json.data || []);
+                    computeEngagementFromRecipients();
+                    break;
                 case 'nurture':    parseNurtureCSV(csvText);    break;
                 case 'newsletter': parseNewsletterCSV(csvText); break;
                 case 'forms':      parseFormsCSV(csvText);      break;
