@@ -186,7 +186,7 @@
         <h1 class="text-xl font-bold">Sign Up</h1>
     </div>
 
-    <div class="grid grid-cols-7 gap-3 mb-8">
+    <div class="grid grid-cols-8 gap-3 mb-8">
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-blue-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Sent</p>
             <p class="text-xl font-bold mt-1 text-blue-400" id="home-kpi-sent">—</p>
@@ -211,6 +211,11 @@
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced Email</p>
             <p class="text-xl font-bold mt-1 text-gray-300" id="home-kpi-bounced">—</p>
             <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
+        </div>
+        <div class="card-bg p-3.5 rounded-xl border-t-4 border-orange-500">
+            <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+            <p class="text-xl font-bold mt-1 text-orange-400" id="home-kpi-unsub">—</p>
+            <p class="text-[9px] text-gray-500 mt-0.5">Opt-out count</p>
         </div>
         <div class="card-bg p-3.5 rounded-xl border-t-4 border-amber-500">
             <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Avg Open Rate</p>
@@ -336,61 +341,6 @@
         </div>
     </div>
 
-    <!-- Row: Recipient Activity + Top Organisations (Sign Up recipients, from the master Recipients CSV) -->
-    <div class="grid gap-4 mb-4" style="grid-template-columns:3fr 2fr; margin-top:30px;">
-
-        <!-- Recipient Activity -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Recipient Activity</h3>
-                <span class="text-[10px] text-gray-500 bg-gray-800/60 px-2 py-0.5 rounded ml-2">All Emails</span>
-                <span class="text-[10px] text-gray-500 ml-auto" id="home-rec-count">— contacts</span>
-            </div>
-            <div class="mb-3 flex gap-2">
-                <div class="relative flex-1">
-                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                    <input id="homeSearchInput" type="text" placeholder="Search email..." oninput="filterHomeRecipients()"
-                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-                </div>
-                <select id="homeFilterSel" onchange="filterHomeRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                    <option value="all">All</option>
-                    <option value="opened">Opened</option>
-                    <option value="not_opened">Not Opened</option>
-                    <option value="clicked">Clicked</option>
-                </select>
-            </div>
-            <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
-                <table class="w-full text-[11px] text-left">
-                    <thead class="sticky top-0 bg-[#1a1d26]">
-                        <tr class="text-blue-400 border-b border-gray-800">
-                            <th class="pb-2 font-semibold">EMAIL</th>
-                            <th class="pb-2 font-semibold text-center">SENT</th>
-                            <th class="pb-2 font-semibold text-center">READ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="homeRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-                </table>
-            </div>
-            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-                <span id="homePageInfo" class="text-[10px] text-gray-500"></span>
-                <div class="flex gap-1">
-                    <button onclick="homePrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                    <button onclick="homeNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top Organisations -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Top Organisations</h3>
-                <span class="text-[10px] text-gray-500">By email count</span>
-            </div>
-            <div id="home-orgs-list" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;">
-                <p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- ===== SIGN UP DETAIL PAGE ===== -->
@@ -448,7 +398,7 @@
             </div>
         </div>
     </div>
-    <div class="grid grid-cols-4 gap-3 mb-5">
+    <div class="grid grid-cols-5 gap-3 mb-5">
         <div class="card-bg p-4 rounded-xl border-t-4 border-purple-500">
             <div class="flex justify-between items-start">
                 <div>
@@ -477,6 +427,16 @@
                     <p class="text-[9px] text-gray-500 mt-0.5" id="su-bounced-sub">— bounce rate</p>
                 </div>
                 <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-orange-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+                    <p class="text-2xl font-bold mt-1 text-orange-400" id="su-unsub">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="su-unsub-sub">— opt-out rate</p>
+                </div>
+                <i class="fa-solid fa-user-slash text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
         <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
@@ -548,62 +508,6 @@
         </div>
     </div>
 
-    <!-- Row 3: Recipient Activity + Top Organisations -->
-    <div class="grid gap-4 mb-4" style="grid-template-columns:3fr 2fr;">
-
-        <!-- Recipient Activity -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Recipient Activity</h3>
-                <span class="text-[10px] text-gray-500" id="su-contact-count">— contacts</span>
-            </div>
-            <div class="mb-3 flex gap-2">
-                <div class="relative flex-1">
-                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                    <input id="searchInput" type="text" placeholder="Search email..." oninput="filterRecipients()"
-                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-                </div>
-                <select id="filterSel" onchange="filterRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                    <option value="all">All</option>
-                    <option value="opened">Opened</option>
-                    <option value="not_opened">Not Opened</option>
-                    <option value="clicked">Clicked</option>
-                </select>
-            </div>
-            <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
-                <table class="w-full text-[11px] text-left">
-                    <thead class="sticky top-0 bg-[#1a1d26]">
-                        <tr class="text-blue-400 border-b border-gray-800">
-                            <th class="pb-2 font-semibold">EMAIL</th>
-                            <th class="pb-2 font-semibold text-center">SENT</th>
-                            <th class="pb-2 font-semibold text-center">READ</th>
-                            <th class="pb-2 font-semibold text-center">CLICKED</th>
-                        </tr>
-                    </thead>
-                    <tbody id="recipientBody" class="divide-y divide-gray-800/30"></tbody>
-                </table>
-            </div>
-            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-                <span id="pageInfo" class="text-[10px] text-gray-500"></span>
-                <div class="flex gap-1">
-                    <button onclick="prevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                    <button onclick="nextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top Organisations -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Top Organisations</h3>
-                <span class="text-[10px] text-gray-500">By email count</span>
-            </div>
-            <div id="orgList" class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;"></div>
-        </div>
-    </div>
-
-
-
 </div><!-- end page-signup -->
 
 <!-- ===== EMAIL NURTURING PAGE ===== -->
@@ -665,7 +569,7 @@
             </div>
         </div>
     </div>
-    <div class="grid grid-cols-4 gap-3 mb-5">
+    <div class="grid grid-cols-5 gap-3 mb-5">
         <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
             <div class="flex justify-between items-start">
                 <div>
@@ -694,6 +598,16 @@
                     <p class="text-[9px] text-gray-500 mt-0.5">Bounce count</p>
                 </div>
                 <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-orange-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+                    <p class="text-2xl font-bold mt-1 text-orange-400" id="nurture-unsub">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Opt-out count</p>
+                </div>
+                <i class="fa-solid fa-user-slash text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
         <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
@@ -772,7 +686,7 @@
             </div>
         </div>
     </div>
-    <div class="grid grid-cols-4 gap-3 mb-5">
+    <div class="grid grid-cols-5 gap-3 mb-5">
         <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
             <div class="flex justify-between items-start">
                 <div>
@@ -801,6 +715,16 @@
                     <p class="text-[9px] text-gray-500 mt-0.5">0.0% bounce rate</p>
                 </div>
                 <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-orange-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+                    <p class="text-2xl font-bold mt-1 text-orange-400" id="cat-unsub">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">Opt-out count</p>
+                </div>
+                <i class="fa-solid fa-user-slash text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
         <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
@@ -872,61 +796,6 @@
         </div>
     </div>
 
-    <!-- Row 3: Recipient Activity + Top Organisations -->
-    <div class="grid gap-4 mb-4" style="grid-template-columns:3fr 2fr;">
-
-        <!-- Recipient Activity -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Recipient Activity</h3>
-                <span class="text-[10px] text-gray-500" id="cat-recipient-count">— contacts</span>
-            </div>
-            <div class="mb-3 flex gap-2">
-                <div class="relative flex-1">
-                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                    <input id="catSearchInput" type="text" placeholder="Search email..." oninput="filterCatRecipients()"
-                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-                </div>
-                <select id="catFilterSel" onchange="filterCatRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                    <option value="all">All</option>
-                    <option value="opened">Opened</option>
-                    <option value="not_opened">Not Opened</option>
-                    <option value="clicked">Clicked</option>
-                </select>
-            </div>
-            <div class="overflow-y-auto style-scrollbar" style="max-height:280px;">
-                <table class="w-full text-[11px] text-left">
-                    <thead class="sticky top-0 bg-[#1a1d26]">
-                        <tr class="text-blue-400 border-b border-gray-800">
-                            <th class="pb-2 font-semibold">EMAIL</th>
-                            <th class="pb-2 font-semibold text-center">SENT</th>
-                            <th class="pb-2 font-semibold text-center">READ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="catRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-                </table>
-            </div>
-            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-                <span id="catPageInfo" class="text-[10px] text-gray-500"></span>
-                <div class="flex gap-1">
-                    <button onclick="catPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                    <button onclick="catNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top Organisations -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Top Organisations</h3>
-                <span class="text-[10px] text-gray-500">By email count</span>
-            </div>
-            <div class="space-y-2.5 overflow-y-auto style-scrollbar" style="max-height:360px; padding:14px;" id="cat-orgs-list">
-                <p class="text-xs text-gray-600 text-center py-8">No data yet — upload the master Recipients CSV.</p>
-            </div>
-        </div>
-    </div>
-
 </div><!-- end page-category -->
 
 <!-- ===== EVENT OCCUR DETAIL PAGE ===== -->
@@ -979,7 +848,7 @@
     </div>
 
     <!-- KPI Cards Row 2 -->
-    <div class="grid grid-cols-4 gap-3 mb-5">
+    <div class="grid grid-cols-5 gap-3 mb-5">
         <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
             <div class="flex justify-between items-start">
                 <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Opened</p>
@@ -1002,6 +871,14 @@
                 <p class="text-2xl font-bold mt-1 text-red-400" id="eo-notopen">—</p>
                 <p class="text-[9px] text-gray-500 mt-0.5" id="eo-notopen-pct">—% of sent</p></div>
                 <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-orange-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+                <p class="text-2xl font-bold mt-1 text-orange-400" id="eo-unsub">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Opt-out count</p></div>
+                <i class="fa-solid fa-user-slash text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
         <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
@@ -1074,47 +951,6 @@
         </div>
     </div>
 
-    <!-- Recipient Activity -->
-    <div class="card-bg p-5 rounded-xl">
-        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-            <h3 class="text-sm font-semibold">Recipient Activity</h3>
-            <span class="text-[10px] text-gray-500" id="eo-rec-count">— contacts</span>
-        </div>
-        <div class="mb-3 flex gap-2">
-            <div class="relative flex-1">
-                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                <input id="eoSearchInput" type="text" placeholder="Search email..." oninput="filterEORecipients()"
-                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-            </div>
-            <select id="eoFilterSel" onchange="filterEORecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                <option value="all">All</option>
-                <option value="opened">Opened</option>
-                <option value="not_opened">Not Opened</option>
-                <option value="clicked">Clicked</option>
-            </select>
-        </div>
-        <div class="overflow-y-auto style-scrollbar" style="max-height:260px;">
-            <table class="w-full text-[11px] text-left">
-                <thead class="sticky top-0 bg-[#1a1d26]">
-                    <tr class="text-blue-400 border-b border-gray-800">
-                        <th class="pb-2 font-semibold">EMAIL</th>
-                        <th class="pb-2 font-semibold text-center">SENT</th>
-                        <th class="pb-2 font-semibold text-center">READ</th>
-                        <th class="pb-2 font-semibold text-center">CLICKED</th>
-                    </tr>
-                </thead>
-                <tbody id="eoRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-            </table>
-        </div>
-        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-            <span id="eoPageInfo" class="text-[10px] text-gray-500"></span>
-            <div class="flex gap-1">
-                <button onclick="eoPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                <button onclick="eoNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-            </div>
-        </div>
-    </div>
-
 </div><!-- end page-eventoccur -->
 
 <!-- ===== REGISTRATION DETAIL PAGE ===== -->
@@ -1171,7 +1007,7 @@
     </div>
 
     <!-- KPI Cards Row 2 -->
-    <div class="grid grid-cols-4 gap-3 mb-5">
+    <div class="grid grid-cols-5 gap-3 mb-5">
         <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
             <div class="flex justify-between items-start">
                 <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Emails Opened</p>
@@ -1194,6 +1030,14 @@
                 <p class="text-2xl font-bold mt-1 text-red-400" id="reg-notopen">—</p>
                 <p class="text-[9px] text-gray-500 mt-0.5" id="reg-notopen-pct">—% of sent</p></div>
                 <i class="fa-solid fa-xmark text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-orange-500">
+            <div class="flex justify-between items-start">
+                <div><p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+                <p class="text-2xl font-bold mt-1 text-orange-400" id="reg-unsub">—</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">Opt-out count</p></div>
+                <i class="fa-solid fa-user-slash text-gray-700 text-lg mt-1"></i>
             </div>
         </div>
         <div class="card-bg p-4 rounded-xl border-t-4 border-pink-500">
@@ -1238,64 +1082,6 @@
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Recipient Activity + Top Organisations — side by side -->
-    <div class="grid grid-cols-2 gap-4">
-
-        <!-- Recipient Activity -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Recipient Activity</h3>
-                <span class="text-[10px] text-gray-500" id="reg-rec-count">— contacts</span>
-            </div>
-            <div class="mb-3 flex gap-2">
-                <div class="relative flex-1">
-                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                    <input id="regSearchInput" type="text" placeholder="Search email..." oninput="filterRegRecipients()"
-                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-                </div>
-                <select id="regFilterSel" onchange="filterRegRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                    <option value="all">All</option>
-                    <option value="opened">Opened</option>
-                    <option value="not_opened">Not Opened</option>
-                    <option value="clicked">Clicked</option>
-                </select>
-            </div>
-            <div class="overflow-y-auto style-scrollbar" style="max-height:260px;">
-                <table class="w-full text-[11px] text-left">
-                    <thead class="sticky top-0 bg-[#1a1d26]">
-                        <tr class="text-blue-400 border-b border-gray-800">
-                            <th class="pb-2 font-semibold">EMAIL</th>
-                            <th class="pb-2 font-semibold text-center">SENT</th>
-                            <th class="pb-2 font-semibold text-center">READ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="regRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-                </table>
-            </div>
-            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-                <span id="regPageInfo" class="text-[10px] text-gray-500"></span>
-                <div class="flex gap-1">
-                    <button onclick="regPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                    <button onclick="regNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top Organisations -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold flex items-center gap-2">
-                    <i class="fa-solid fa-building text-amber-400 text-xs"></i> Top Organisations
-                </h3>
-                <span class="text-[10px] text-gray-500">By email domain — top 15</span>
-            </div>
-            <div id="reg-top-org" class="space-y-1.5 overflow-y-auto style-scrollbar" style="max-height:340px;">
-                <p class="text-[11px] text-gray-600">No data yet — load recipients first.</p>
-            </div>
-        </div>
-
     </div>
 
 </div><!-- end page-registration -->
@@ -1346,6 +1132,7 @@ function renderHome() {
         set('home-kpi-clicks', su.clicked);
         set('home-kpi-notopen', notOpen);
         set('home-kpi-bounced', su.bounced);
+        set('home-kpi-unsub', su.unsubscribed);
         set('home-kpi-openrate', pct(su.read, su.sent));
         set('home-kpi-clickrate', pct(su.clicked, su.sent));
     }
@@ -1838,6 +1625,7 @@ function showCategory(catName) {
     const opened = eg ? eg.read : 0;
     const clicked = eg ? eg.clicked : 0;
     const bounced = eg ? eg.bounced : 0;
+    const unsubscribed = eg ? (eg.unsubscribed || 0) : 0;
     const notOpened = sent - opened;
     const openRate = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
     const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
@@ -1858,6 +1646,8 @@ function showCategory(catName) {
     document.getElementById('cat-notopen-pct').textContent= sent ? (notOpened/sent*100).toFixed(1)+'% of sent' : '— of sent';
     document.getElementById('cat-cto').textContent        = cto;
     document.getElementById('cat-orgs').textContent       = eg ? (bounced || 0) : '—'; // org-count slot repurposed; see note below
+    const catUnsubEl = document.getElementById('cat-unsub');
+    if (catUnsubEl) catUnsubEl.textContent = eg ? unsubscribed : '—';
     document.getElementById('cat-avg-open').textContent   = openRate;
 
     // Funnel
@@ -1883,7 +1673,8 @@ function showCategory(catName) {
     // found for this category (may differ slightly from the engagement CSV's Sent
     // count if the two exports were taken at different times).
     const recipientRows = recipientsByCategory[catName] || [];
-    document.getElementById('cat-recipient-count').textContent = recipientRows.length + ' contacts';
+    const catRecCountEl = document.getElementById('cat-recipient-count');
+    if (catRecCountEl) catRecCountEl.textContent = recipientRows.length + ' contacts';
     catPage = 1;
     if(document.getElementById('catSearchInput')) document.getElementById('catSearchInput').value='';
     filterCatRecipients();
@@ -1910,7 +1701,9 @@ function drawCatDonut(clicked, openedNot, notOpened, total) {
 }
 
 function filterCatRecipients() {
-    const q = (document.getElementById('catSearchInput').value || '').toLowerCase();
+    const catSearchEl = document.getElementById('catSearchInput');
+    if (!catSearchEl) return; // Recipient Activity table removed for now
+    const q = (catSearchEl.value || '').toLowerCase();
     const f = document.getElementById('catFilterSel') ? document.getElementById('catFilterSel').value : 'all';
     const base = recipientsByCategory[currentCategory] || [];
     catFiltered = base.filter(r => {
@@ -1926,22 +1719,24 @@ function filterCatRecipients() {
 }
 
 function renderCatTable() {
+    const catBodyEl = document.getElementById('catRecipientBody');
+    if (!catBodyEl) return; // Recipient Activity table removed for now
     if (!catFiltered.length) {
-        document.getElementById('catRecipientBody').innerHTML =
+        catBodyEl.innerHTML =
             '<tr><td colspan="3" class="py-8 text-center text-gray-600 text-xs">No recipients found — upload the master Recipients CSV, or no match for this category.</td></tr>';
-        document.getElementById('catPageInfo').textContent = 'No results';
+        const infoEl = document.getElementById('catPageInfo'); if (infoEl) infoEl.textContent = 'No results';
         return;
     }
     const start = (catPage-1)*catPerPage;
     const rows = catFiltered.slice(start, start+catPerPage);
-    document.getElementById('catRecipientBody').innerHTML = rows.map(r=>`
+    catBodyEl.innerHTML = rows.map(r=>`
         <tr class="hover:bg-gray-800/20 transition">
             <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
             <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
             <td class="text-center">${r.read==='Yes'?'<span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>':r.read==='No'?'<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>':'<span class="text-gray-600">—</span>'}</td>
         </tr>`).join('');
     const total = catFiltered.length;
-    document.getElementById('catPageInfo').textContent = total ? `${start+1}–${Math.min(start+catPerPage,total)} of ${total}` : 'No results';
+    const infoEl = document.getElementById('catPageInfo'); if (infoEl) infoEl.textContent = total ? `${start+1}–${Math.min(start+catPerPage,total)} of ${total}` : 'No results';
 }
 function catPrevPage(){ if(catPage>1){catPage--;renderCatTable();} }
 function catNextPage(){ if(catPage<Math.ceil(catFiltered.length/catPerPage)){catPage++;renderCatTable();} }
@@ -1992,8 +1787,10 @@ const perPage = 12;
 let filtered = [...csvData];
 
 function filterRecipients() {
-    const q = document.getElementById('searchInput').value.toLowerCase();
-    const f = document.getElementById('filterSel').value;
+    const searchEl = document.getElementById('searchInput');
+    if (!searchEl) return; // Recipient Activity table removed for now
+    const q = searchEl.value.toLowerCase();
+    const f = document.getElementById('filterSel') ? document.getElementById('filterSel').value : 'all';
     filtered = csvData.filter(r => {
         const mq = r.email.toLowerCase().includes(q);
         const mf = f === 'all' ? true : f === 'clicked' ? r.clicked === 'Yes' : f === 'opened' ? r.read === 'Yes' : r.read === 'No';
@@ -2004,9 +1801,11 @@ function filterRecipients() {
 }
 
 function renderRecipients() {
+    const bodyEl = document.getElementById('recipientBody');
+    if (!bodyEl) return; // Recipient Activity table removed for now
     const start = (currentPage - 1) * perPage;
     const rows = filtered.slice(start, start + perPage);
-    document.getElementById('recipientBody').innerHTML = rows.map(r => `
+    bodyEl.innerHTML = rows.map(r => `
         <tr class="hover:bg-gray-800/20 transition">
             <td class="py-2 text-gray-300 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
             <td class="text-center text-gray-500" style="font-size:10px;white-space:nowrap;">${r.sent || '—'}</td>
@@ -2014,7 +1813,8 @@ function renderRecipients() {
             <td class="text-center">${r.clicked==='Yes' ? '<span style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;">Yes</span>' : '<span style="background:rgba(75,85,99,0.3);color:#6b7280;font-size:10px;padding:1px 8px;border-radius:999px;">No</span>'}</td>
         </tr>`).join('');
     const total = filtered.length;
-    document.getElementById('pageInfo').textContent = `${start+1}–${Math.min(start+perPage,total)} of ${total}`;
+    const infoEl = document.getElementById('pageInfo');
+    if (infoEl) infoEl.textContent = `${start+1}–${Math.min(start+perPage,total)} of ${total}`;
 }
 function prevPage() { if (currentPage > 1) { currentPage--; renderRecipients(); } }
 function nextPage() { if (currentPage < Math.ceil(filtered.length/perPage)) { currentPage++; renderRecipients(); } }
@@ -2022,6 +1822,7 @@ function nextPage() { if (currentPage < Math.ceil(filtered.length/perPage)) { cu
 // ===== ORG LIST =====
 function renderOrgs() {
     const container = document.getElementById('orgList');
+    if (!container) return; // Top Organisations panel removed for now
     if (!orgData.length) {
         container.innerHTML = '<p class="text-xs text-gray-600 text-center py-6">No data — upload CSV to populate</p>';
         return;
@@ -2119,6 +1920,7 @@ function parseNurtureCSV(text) {
     const clickPctIdx= headers.findIndex(h => h.includes('clicks ratio'));
     const bounceIdx  = headers.findIndex(h => h === 'bounced');
     const bouncePctIdx = headers.findIndex(h => h.includes('bounced ratio'));
+    const unsubIdx   = headers.findIndex(h => h.includes('unsubscri'));
 
     const groups = {}; // groupId -> { id, varA, varB }
     for (let i = 1; i < allRows.length; i++) {
@@ -2142,7 +1944,8 @@ function parseNurtureCSV(text) {
             notOpen: notOpen,
             notOpenPct: sent ? (notOpen/sent*100).toFixed(1)+'%' : '—',
             bounced: parseInt(cols[bounceIdx], 10) || 0,
-            bouncedPct: cols[bouncePctIdx] || '0.00%'
+            bouncedPct: cols[bouncePctIdx] || '0.00%',
+            unsubscribed: unsubIdx !== -1 ? (parseInt(cols[unsubIdx], 10) || 0) : 0
         };
 
         if (!groups[groupId]) groups[groupId] = { id: 'Email ' + groupId, baseName, varA: null, varB: null };
@@ -2171,7 +1974,7 @@ function renderNurturing() {
     if (countEl) countEl.textContent = nurturingData.length + (nurturingData.length===1?' Email':' Emails');
 
     // Aggregate top KPI cards across all email groups and both variants
-    let totalSent=0, totalRead=0, totalClicks=0, totalBounced=0, variantCount=0;
+    let totalSent=0, totalRead=0, totalClicks=0, totalBounced=0, totalUnsub=0, variantCount=0;
     nurturingData.forEach(e => {
         [e.varA, e.varB].forEach(v => {
             if (!v) return;
@@ -2180,6 +1983,7 @@ function renderNurturing() {
             totalRead += v.read;
             totalClicks += v.clicks;
             totalBounced += v.bounced;
+            totalUnsub += v.unsubscribed || 0;
         });
     });
     const totalNotOpen = totalSent - totalRead;
@@ -2189,6 +1993,7 @@ function renderNurturing() {
         set('nurture-clicks', totalClicks.toLocaleString());
         set('nurture-notopen', totalNotOpen.toLocaleString());
         set('nurture-bounced', totalBounced.toLocaleString());
+        set('nurture-unsub', totalUnsub.toLocaleString());
         set('nurture-openrate', pct(totalRead, totalSent));
         set('nurture-clickrate', pct(totalClicks, totalSent));
         set('nurture-variants', variantCount);
@@ -2396,6 +2201,7 @@ function showRegistration(name) {
     const opened   = eg ? eg.read : 0;
     const clicked  = eg ? eg.clicked : 0;
     const notOpen  = eg ? (eg.sent - eg.read) : 0;
+    const unsub    = eg ? (eg.unsubscribed || 0) : 0;
     const openRate  = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
     const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
     const cto       = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
@@ -2417,6 +2223,8 @@ function showRegistration(name) {
     document.getElementById('reg-click-rate').textContent  = 'Click rate: ' + clickRate;
     document.getElementById('reg-notopen').textContent     = eg ? notOpen : '—';
     document.getElementById('reg-notopen-pct').textContent = notOpenPct + ' of sent';
+    const regUnsubEl = document.getElementById('reg-unsub');
+    if (regUnsubEl) regUnsubEl.textContent = eg ? unsub : '—';
     document.getElementById('reg-cto').textContent         = cto;
 
     // Assigned Tags cards — each tag's "assigned to" count equals total submissions,
@@ -2445,7 +2253,8 @@ function showRegistration(name) {
     // has no matching campaign in that CSV (it's a Forms-only concept), so it will
     // correctly show "0 contacts" rather than reusing the "Jobs" recipient list.
     const recipientRows = recipientsByCategory[name] || [];
-    document.getElementById('reg-rec-count').textContent = recipientRows.length + ' contacts';
+    const regRecCountEl = document.getElementById('reg-rec-count');
+    if (regRecCountEl) regRecCountEl.textContent = recipientRows.length + ' contacts';
     regPage = 1;
     const srch=document.getElementById('regSearchInput'); if(srch) srch.value='';
     filterRegRecipients();
@@ -2477,7 +2286,9 @@ function showRegistration(name) {
 }
 
 function filterRegRecipients() {
-    const q = (document.getElementById('regSearchInput').value || '').toLowerCase();
+    const regSearchEl = document.getElementById('regSearchInput');
+    if (!regSearchEl) return; // Recipient Activity table removed for now
+    const q = (regSearchEl.value || '').toLowerCase();
     const f = document.getElementById('regFilterSel') ? document.getElementById('regFilterSel').value : 'all';
     const base = recipientsByCategory[currentRegName] || [];
     regFiltered = base.filter(r => {
@@ -2554,6 +2365,7 @@ function showEventOccur(name, tag, color) {
     const opened   = emailData.filter(r=>r.read==='Yes').length;
     const clicked  = emailData.filter(r=>r.clicked==='Yes').length;
     const notOpen  = emailData.filter(r=>r.read==='No').length;
+    const unsub    = emailData.filter(r=>r.unsubscribed==='Yes').length;
     const openRate  = sent ? (opened/sent*100).toFixed(1)+'%' : '—';
     const clickRate = sent ? (clicked/sent*100).toFixed(1)+'%' : '—';
     const cto       = opened ? (clicked/opened*100).toFixed(1)+'%' : '—';
@@ -2573,6 +2385,8 @@ function showEventOccur(name, tag, color) {
     document.getElementById('eo-click-rate').textContent= 'Click rate: ' + clickRate;
     document.getElementById('eo-notopen').textContent   = notOpen || '—';
     document.getElementById('eo-notopen-pct').textContent = notOpenPct + ' of sent';
+    const eoUnsubEl = document.getElementById('eo-unsub');
+    if (eoUnsubEl) eoUnsubEl.textContent = emailData.length ? unsub : '—';
     document.getElementById('eo-cto').textContent       = cto;
 
     // Tag info
@@ -2594,7 +2408,8 @@ function showEventOccur(name, tag, color) {
     }
 
     // Recipients
-    document.getElementById('eo-rec-count').textContent = (sent||0) + ' contacts';
+    const eoRecCountEl = document.getElementById('eo-rec-count');
+    if (eoRecCountEl) eoRecCountEl.textContent = (sent||0) + ' contacts';
     eoFiltered = [...emailData];
     eoPage = 1;
     const srch = document.getElementById('eoSearchInput');
@@ -2606,8 +2421,10 @@ function showEventOccur(name, tag, color) {
 
 // ===== EO RECIPIENT TABLE =====
 function filterEORecipients() {
-    const q = document.getElementById('eoSearchInput').value.toLowerCase();
-    const f = document.getElementById('eoFilterSel').value;
+    const eoSearchEl = document.getElementById('eoSearchInput');
+    if (!eoSearchEl) return; // Recipient Activity table removed for now
+    const q = eoSearchEl.value.toLowerCase();
+    const f = document.getElementById('eoFilterSel') ? document.getElementById('eoFilterSel').value : 'all';
     eoFiltered = csvData.filter(r => {
         const mq = r.email.toLowerCase().includes(q);
         const mf = f==='all'?true: f==='clicked'?r.clicked==='Yes': f==='opened'?r.read==='Yes': r.read==='No';
@@ -2699,7 +2516,7 @@ function parseNewsletterCSV(text) {
         return db.localeCompare(da);
     });
 
-    nlWeeks = campaigns.map((c, i) => ({ week: 'Week '+(i+1), label: c.label, sent: c.sent, read: c.read, clicked: c.clicked, bounced: c.bounced }));
+    nlWeeks = campaigns.map((c, i) => ({ week: 'Week '+(i+1), label: c.label, sent: c.sent, read: c.read, clicked: c.clicked, bounced: c.bounced, unsubscribed: c.unsubscribed }));
 }
 
 let nlSelectedWeek = 0;
@@ -2745,7 +2562,7 @@ function renderNLList() {
 
 function selectNLWeek(i) {
     if (!nlWeeks.length) {
-        const ids = ['nl-funnel-label','nl-kpi-sent','nl-kpi-read','nl-kpi-click','nl-kpi-notopen','nl-f-sent-val','nl-f-read-val','nl-f-click-val','nl-eg-clicked','nl-eg-opened','nl-eg-notopened'];
+        const ids = ['nl-funnel-label','nl-kpi-sent','nl-kpi-read','nl-kpi-click','nl-kpi-notopen','nl-kpi-unsub','nl-f-sent-val','nl-f-read-val','nl-f-click-val','nl-eg-clicked','nl-eg-opened','nl-eg-notopened'];
         ids.forEach(id => { const el=document.getElementById(id); if(el) el.textContent='—'; });
         const rc = document.getElementById('nl-rec-count'); if(rc) rc.textContent = '0 contacts';
         nlFiltered = [];
@@ -2770,6 +2587,8 @@ function selectNLWeek(i) {
     document.getElementById('nl-kpi-read').textContent    = w.read || '—';
     document.getElementById('nl-kpi-click').textContent   = w.clicked || '—';
     document.getElementById('nl-kpi-notopen').textContent = notOpen || '—';
+    const nlUnsubEl = document.getElementById('nl-kpi-unsub');
+    if (nlUnsubEl) nlUnsubEl.textContent = (w.unsubscribed || 0);
 
     // Funnel bars
     document.getElementById('nl-f-sent-val').textContent  = w.sent || '—';
@@ -2790,7 +2609,8 @@ function selectNLWeek(i) {
     // Recipients for this specific newsletter campaign, from the master Recipients CSV.
     // Matched by exact campaign label (same "Name" string in both CSVs).
     const recipientRows = recipientsByNewsletter[w.label] || [];
-    document.getElementById('nl-rec-count').textContent = recipientRows.length + ' contacts';
+    const nlRecCountEl = document.getElementById('nl-rec-count');
+    if (nlRecCountEl) nlRecCountEl.textContent = recipientRows.length + ' contacts';
     nlFiltered = recipientRows.slice();
     nlPage = 1;
     const srch=document.getElementById('nlSearchInput'); if(srch) srch.value='';
@@ -2826,7 +2646,9 @@ function drawNLDonut(clicked, openedNot, notOpened, total) {
 }
 
 function filterNLRecipients() {
-    const q = (document.getElementById('nlSearchInput').value || '').toLowerCase();
+    const nlSearchEl = document.getElementById('nlSearchInput');
+    if (!nlSearchEl) return; // Recipient Activity table removed for now
+    const q = (nlSearchEl.value || '').toLowerCase();
     const f = document.getElementById('nlFilterSel') ? document.getElementById('nlFilterSel').value : 'all';
     const w = nlWeeks[nlSelectedWeek];
     const base = w ? (recipientsByNewsletter[w.label] || []) : [];
@@ -3376,6 +3198,7 @@ function parseCSV(text, filename) {
                         ? headers.findIndex(h => h === 'clicked')
                         : headers.findIndex(h => h.includes('click'));
     const bounceIdx  = headers.findIndex(h => h.includes('bounce'));
+    const unsubIdx   = headers.findIndex(h => h.includes('unsubscri'));
     const subjectIdx = headers.findIndex(h => h.includes('subject'));
 
     // Clear and refill csvData
@@ -3409,7 +3232,8 @@ function parseCSV(text, filename) {
             sentRaw: sentRaw,
             read:    readVal,
             clicked: (cols[clickIdx]  || '').trim().toLowerCase() === 'yes' ? 'Yes' : 'No',
-            bounced: bounceIdx !== -1 ? ((cols[bounceIdx]||'').trim().toLowerCase() === 'yes' ? 'Yes' : 'No') : 'No'
+            bounced: bounceIdx !== -1 ? ((cols[bounceIdx]||'').trim().toLowerCase() === 'yes' ? 'Yes' : 'No') : 'No',
+            unsubscribed: unsubIdx !== -1 ? ((cols[unsubIdx]||'').trim().toLowerCase() === 'yes' ? 'Yes' : 'No') : 'No'
         });
     }
     csvData.subject = firstSubject;
@@ -3442,6 +3266,7 @@ function renderSignupKPIs() {
     const opened = csvData.filter(r=>r.read==='Yes').length;
     const clicked = csvData.filter(r=>r.clicked==='Yes').length;
     const bounced = csvData.filter(r=>r.bounced==='Yes').length;
+    const unsubscribed = csvData.filter(r=>r.unsubscribed==='Yes').length;
     const notOpen = sent - opened;
     const domains = new Set(csvData.map(r=>r.email.split('@')[1]).filter(Boolean));
     const openedNotClicked = opened - clicked;
@@ -3456,6 +3281,7 @@ function renderSignupKPIs() {
     const clickRate  = pct(clicked, sent);
     const cto        = pct(clicked, opened);
     const bounceRate = pct(bounced, sent);
+    const unsubRate  = pct(unsubscribed, sent);
     const notOpenPct = pct(notOpen, sent);
 
     const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent = val; };
@@ -3472,6 +3298,8 @@ function renderSignupKPIs() {
     set('su-notopen-sub', notOpenPct + ' of sent');
     set('su-bounced', bounced || 0);
     set('su-bounced-sub', bounceRate + ' bounce rate');
+    set('su-unsub', unsubscribed || 0);
+    set('su-unsub-sub', unsubRate + ' opt-out rate');
     set('su-openrate', openRate);
     set('su-contact-count', sent + ' contacts');
 
@@ -3538,7 +3366,7 @@ window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); re
                 <span class="text-[10px] text-gray-500" id="nl-funnel-label">Select a week</span>
             </div>
             <!-- KPI mini row -->
-            <div class="grid grid-cols-4 gap-2 mb-4">
+            <div class="grid grid-cols-5 gap-2 mb-4">
                 <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
                     <p class="text-[9px] text-gray-500 uppercase">Sent</p>
                     <p class="text-base font-bold mt-0.5" style="color:#e8533a;" id="nl-kpi-sent">—</p>
@@ -3554,6 +3382,10 @@ window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); re
                 <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
                     <p class="text-[9px] text-gray-500 uppercase">Not Open</p>
                     <p class="text-base font-bold mt-0.5 text-red-400" id="nl-kpi-notopen">—</p>
+                </div>
+                <div class="rounded-lg p-2.5 text-center" style="background:#161920;">
+                    <p class="text-[9px] text-gray-500 uppercase">Unsub</p>
+                    <p class="text-base font-bold mt-0.5 text-orange-400" id="nl-kpi-unsub">—</p>
                 </div>
             </div>
             <!-- Funnel bars -->
@@ -3586,51 +3418,11 @@ window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); re
         </div>
     </div>
 
-    <!-- Bottom: Recipient Table + Engagement Donut -->
-    <div class="grid gap-4" style="grid-template-columns: 3fr 1.2fr;">
-
-        <!-- Recipient Table -->
-        <div class="card-bg p-5 rounded-xl">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
-                <h3 class="text-sm font-semibold">Recipient Activity</h3>
-                <span class="text-[10px] text-gray-500" id="nl-rec-count">— contacts</span>
-            </div>
-            <div class="mb-3 flex gap-2">
-                <div class="relative flex-1">
-                    <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
-                    <input id="nlSearchInput" type="text" placeholder="Search email..." oninput="filterNLRecipients()"
-                        class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
-                </div>
-                <select id="nlFilterSel" onchange="filterNLRecipients()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
-                    <option value="all">All</option>
-                    <option value="opened">Opened</option>
-                    <option value="not_opened">Not Opened</option>
-                    <option value="clicked">Clicked</option>
-                </select>
-            </div>
-            <div class="overflow-y-auto style-scrollbar" style="max-height:290px;">
-                <table class="w-full text-[11px] text-left">
-                    <thead class="sticky top-0 bg-[#1a1d26]">
-                        <tr class="text-blue-400 border-b border-gray-800">
-                            <th class="pb-2 font-semibold">EMAIL</th>
-                            <th class="pb-2 font-semibold text-center">SENT</th>
-                            <th class="pb-2 font-semibold text-center">READ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="nlRecipientBody" class="divide-y divide-gray-800/30"></tbody>
-                </table>
-            </div>
-            <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
-                <span id="nlPageInfo" class="text-[10px] text-gray-500"></span>
-                <div class="flex gap-1">
-                    <button onclick="nlPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
-                    <button onclick="nlNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-            </div>
-        </div>
+    <!-- Bottom: Engagement Donut -->
+    <div class="grid gap-4" style="grid-template-columns: 1fr;">
 
         <!-- Engagement Breakdown Donut -->
-        <div class="card-bg p-5 rounded-xl flex flex-col">
+        <div class="card-bg p-5 rounded-xl flex flex-col" style="max-width:360px;">
             <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
                 <h3 class="text-sm font-semibold">Engagement</h3>
                 <span class="text-[10px] text-gray-500">Breakdown</span>
