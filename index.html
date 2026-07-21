@@ -40,8 +40,8 @@
         .nav-link { display:flex; align-items:center; gap:12px; font-size:14px; font-weight:500; color:#d1d5db; padding:8px 12px; border-radius:8px; transition:all 0.15s; cursor:pointer; text-decoration:none; }
         .nav-link:hover { color:#fff; background:rgba(255,255,255,0.05); }
         .nav-link.active { color:#e8533a; background:rgba(232,83,58,0.12); border-left:2px solid #e8533a; }
-        #page-home, #page-signup, #page-nurturing, #page-category, #page-eventoccur, #page-registration, #page-newsletter { display:none; flex:1; flex-direction:column; overflow-y:auto; }
-        #page-home.visible, #page-signup.visible, #page-nurturing.visible, #page-category.visible, #page-eventoccur.visible, #page-registration.visible, #page-newsletter.visible { display:flex; }
+        #page-home, #page-signup, #page-nurturing, #page-category, #page-eventoccur, #page-registration, #page-newsletter, #page-dnc { display:none; flex:1; flex-direction:column; overflow-y:auto; }
+        #page-home.visible, #page-signup.visible, #page-nurturing.visible, #page-category.visible, #page-eventoccur.visible, #page-registration.visible, #page-newsletter.visible, #page-dnc.visible { display:flex; }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
@@ -127,6 +127,10 @@
 
         <a onclick="showNewsletter()" id="nav-newsletter" class="nav-link" style="cursor:pointer;">
             <i class="fa-solid fa-newspaper text-gray-400"></i> Newsletter
+        </a>
+
+        <a onclick="showDNC()" id="nav-dnc" class="nav-link" style="cursor:pointer;">
+            <i class="fa-solid fa-user-slash text-red-500"></i> DNC
         </a>
 
         <!-- Registration Form -->
@@ -1088,8 +1092,8 @@
 
 <script>
 // ===== PAGE SWITCHING =====
-const pages = ['page-home','page-signup','page-nurturing','page-category','page-eventoccur','page-registration','page-newsletter'];
-const navs  = ['nav-signup','nav-nurturing','nav-emailcat','nav-eventoccur','nav-registration','nav-newsletter'];
+const pages = ['page-home','page-signup','page-nurturing','page-category','page-eventoccur','page-registration','page-newsletter','page-dnc'];
+const navs  = ['nav-signup','nav-nurturing','nav-emailcat','nav-eventoccur','nav-registration','nav-newsletter','nav-dnc'];
 
 function hideAll() {
     pages.forEach(id => {
@@ -1114,6 +1118,7 @@ function showPage(pageId, navId) {
     }
 }
 function showHome()     { showPage('page-home', null); renderHome(); }
+function showDNC()      { showPage('page-dnc', 'nav-dnc'); renderDNC(); }
 
 // Fills the home page from csvData (the uploaded tag_emails CSV).
 // Only Sign Up has real data right now. "Hits" (page visits) and "Tags Assigned"
@@ -2795,6 +2800,7 @@ function refreshCurrentPageAfterUpload() {
     if (pid === 'page-category' && typeof currentCategory !== 'undefined' && currentCategory) showCategory(currentCategory);
     if (pid === 'page-registration' && typeof currentRegName !== 'undefined' && currentRegName) showRegistration(currentRegName);
     if (pid === 'page-newsletter' && nlWeeks.length)  selectNLWeek(nlSelectedWeek || 0);
+    if (pid === 'page-dnc')         renderDNC();
 }
 
 // ===== PERSIST FETCHED DATA ACROSS PAGE REFRESHES =====
@@ -2819,6 +2825,7 @@ function saveAppDataToStorage() {
             nlWeeks,
             nlGroupRows,
             regSubmissions,
+            dncData,
             savedAt: new Date().toISOString()
         };
         localStorage.setItem(APP_DATA_STORAGE_KEY, JSON.stringify(snapshot));
@@ -2846,6 +2853,7 @@ function loadAppDataFromStorage() {
                 if (regData[k]) regData[k].submissions = snap.regSubmissions[k];
             });
         }
+        if (snap.dncData) { dncData = snap.dncData; dncFiltered = dncData.slice(); }
         // Recompute engagement from recipients so home page KPIs are always accurate
         computeEngagementFromRecipients();
 
@@ -2871,6 +2879,7 @@ const REPORT_MAP = [
     { id: 10, type: 'forms',      label: 'Form Submissions' },      // light
     { id: 13, type: 'nurture',    label: 'Nurture Emails' },        // medium
     { id: 12, type: 'newsletter', label: 'Newsletter' },            // medium
+    { id: 23, type: 'dnc',        label: 'Do Not Contact' },        // light
     { id: 15, type: 'recipients', label: 'Sent Recipients' }        // heavy — last
 ];
 
@@ -2905,6 +2914,110 @@ const REPORT_FIELD_LABELS = {
         unique_hits: 'Clicked'
     }
 };
+
+// ===== DNC (Do Not Contact) — Report 23 =====
+// Fields come already human-readable from the API for this report, so we store
+// them as-is rather than routing through apiJsonToCsv/REPORT_FIELD_LABELS.
+let dncData = [];
+let dncFiltered = [];
+let dncPage = 1;
+const dncPerPage = 25;
+
+function processDNCJson(rows) {
+    dncData = (rows || []).map(r => ({
+        id: r.id || '',
+        name: [r.firstname, r.lastname].filter(Boolean).join(' ').trim() || '—',
+        email: r.email || '',
+        reason: r.reason || '',
+        comments: r.comments || '',
+        date_added: r.date_added || '',   // date the DNC flag was applied
+        date_added1: r.date_added1 || ''  // original lead-created date
+    }));
+    dncFiltered = dncData.slice();
+    dncPage = 1;
+}
+
+function filterDNC() {
+    const searchEl = document.getElementById('dncSearchInput');
+    if (!searchEl) return;
+    const q = (searchEl.value || '').toLowerCase();
+    const f = document.getElementById('dncFilterSel') ? document.getElementById('dncFilterSel').value : 'all';
+    dncFiltered = dncData.filter(r => {
+        const mq = !q || r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q);
+        const isUnsub = /unsubscri/i.test(r.reason);
+        const isBounced = /bounce/i.test(r.reason);
+        const mf = f === 'all' ? true
+                 : f === 'unsubscribed' ? isUnsub
+                 : f === 'bounced' ? isBounced
+                 : true;
+        return mq && mf;
+    });
+    dncPage = 1;
+    renderDNCTable();
+}
+
+function renderDNC() {
+    const kpiTotalEl = document.getElementById('dnc-kpi-total');
+    if (!kpiTotalEl) return; // page not in DOM (shouldn't happen, but stay safe)
+
+    const total = dncData.length;
+    const unsub = dncData.filter(r => /unsubscri/i.test(r.reason)).length;
+    const bounced = dncData.filter(r => /bounce/i.test(r.reason)).length;
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recent = dncData.filter(r => {
+        const d = new Date(r.date_added);
+        return !isNaN(d) && d >= thirtyDaysAgo;
+    }).length;
+
+    kpiTotalEl.textContent = total.toLocaleString();
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('dnc-kpi-unsub', unsub.toLocaleString());
+    set('dnc-kpi-unsub-pct', pct(unsub, total) + ' of total');
+    set('dnc-kpi-bounced', bounced.toLocaleString());
+    set('dnc-kpi-bounced-pct', pct(bounced, total) + ' of total');
+    set('dnc-kpi-recent', recent.toLocaleString());
+    set('dnc-count', total.toLocaleString() + ' records');
+
+    const searchEl = document.getElementById('dncSearchInput'); if (searchEl) searchEl.value = '';
+    const filterEl = document.getElementById('dncFilterSel'); if (filterEl) filterEl.value = 'all';
+    dncFiltered = dncData.slice();
+    dncPage = 1;
+    renderDNCTable();
+}
+
+function renderDNCTable() {
+    const tbody = document.getElementById('dncBody');
+    if (!tbody) return;
+    if (!dncFiltered.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-gray-600 text-xs">No DNC records found — click Refresh Data to load the latest list.</td></tr>';
+        const info = document.getElementById('dncPageInfo');
+        if (info) info.textContent = 'No results';
+        return;
+    }
+    const start = (dncPage - 1) * dncPerPage;
+    const rows = dncFiltered.slice(start, start + dncPerPage);
+    tbody.innerHTML = rows.map(r => {
+        const isUnsub = /unsubscri/i.test(r.reason);
+        const badge = isUnsub
+            ? `<span style="background:rgba(249,115,22,0.15);color:#fb923c;border:1px solid rgba(249,115,22,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;white-space:nowrap;">${r.reason}</span>`
+            : `<span style="background:rgba(107,114,128,0.2);color:#9ca3af;border:1px solid rgba(107,114,128,0.3);font-size:10px;padding:1px 8px;border-radius:999px;font-weight:600;white-space:nowrap;">${r.reason}</span>`;
+        const dateStr = r.date_added ? r.date_added.split(' ')[0] : '—';
+        return `
+        <tr class="hover:bg-gray-800/20 transition">
+            <td class="py-2 text-gray-300" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.name}</td>
+            <td class="text-gray-400 font-mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</td>
+            <td>${badge}</td>
+            <td class="text-gray-500" style="font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.comments || '—'}</td>
+            <td class="text-center text-gray-400" style="font-size:10px;white-space:nowrap;">${dateStr}</td>
+        </tr>`;
+    }).join('');
+    const total = dncFiltered.length;
+    const info = document.getElementById('dncPageInfo');
+    if (info) info.textContent = total ? `${start+1}–${Math.min(start+dncPerPage,total)} of ${total}` : 'No results';
+}
+function dncPrevPage(){ if(dncPage>1){dncPage--;renderDNCTable();} }
+function dncNextPage(){ if(dncPage<Math.ceil(dncFiltered.length/dncPerPage)){dncPage++;renderDNCTable();} }
 
 // Convert Mautic API JSON response to CSV text so existing parsers can handle it.
 // The API returns { data: [ {col1: val, col2: val, ...}, ... ], headers: [...] }
@@ -3066,6 +3179,7 @@ async function fetchAllReports() {
                 case 'nurture':    parseNurtureCSV(csvText);    break;
                 case 'newsletter': parseNewsletterCSV(csvText); break;
                 case 'forms':      parseFormsCSV(csvText);      break;
+                case 'dnc':        processDNCJson(json.data || []); break;
             }
             results.push({ label, ok: true });
             markItem(id, 'done');
@@ -3075,6 +3189,7 @@ async function fetchAllReports() {
                 renderNLList();
                 if (nlWeeks.length) selectNLWeek(0);
                 renderNurturing();
+                renderDNC();
                 refreshCurrentPageAfterUpload();
             } catch(e) { /* non-fatal, full render happens at end */ }
         } catch (err) {
@@ -3094,6 +3209,7 @@ async function fetchAllReports() {
         renderNLList();
         if (nlWeeks.length) selectNLWeek(0);
         renderNurturing();
+        renderDNC();
         refreshCurrentPageAfterUpload();
     } catch (err) {
         console.error('Render error:', err);
@@ -3321,7 +3437,7 @@ function renderSignupKPIs() {
 }
 
 // ===== INIT =====
-window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); renderNLList(); if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0); renderNurturing(); });
+window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); renderNLList(); if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0); renderNurturing(); renderDNC(); });
 </script>
 
 <!-- ===== NEWSLETTER PAGE ===== -->
@@ -3448,6 +3564,101 @@ window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); re
     </div>
 
 </div><!-- end page-newsletter -->
+
+<!-- ===== DNC (DO NOT CONTACT) PAGE ===== -->
+<div id="page-dnc" class="flex-1 flex-col overflow-y-auto p-6 style-scrollbar">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-user-slash text-red-500"></i> Do Not Contact (DNC)</h2>
+            <p class="text-xs text-gray-500 mt-1">Contacts who have unsubscribed or hard-bounced — from Mautic Report 23</p>
+        </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-4 gap-3 mb-5">
+        <div class="card-bg p-4 rounded-xl border-t-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Total DNC</p>
+                    <p class="text-2xl font-bold mt-1 text-red-400" id="dnc-kpi-total">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">All-time records</p>
+                </div>
+                <i class="fa-solid fa-ban text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-orange-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Unsubscribed</p>
+                    <p class="text-2xl font-bold mt-1 text-orange-400" id="dnc-kpi-unsub">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="dnc-kpi-unsub-pct">— of total</p>
+                </div>
+                <i class="fa-solid fa-user-slash text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-gray-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Bounced</p>
+                    <p class="text-2xl font-bold mt-1 text-gray-300" id="dnc-kpi-bounced">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5" id="dnc-kpi-bounced-pct">— of total</p>
+                </div>
+                <i class="fa-solid fa-triangle-exclamation text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+        <div class="card-bg p-4 rounded-xl border-t-4 border-amber-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Last 30 Days</p>
+                    <p class="text-2xl font-bold mt-1 text-amber-400" id="dnc-kpi-recent">—</p>
+                    <p class="text-[9px] text-gray-500 mt-0.5">New DNC entries</p>
+                </div>
+                <i class="fa-solid fa-clock text-gray-700 text-lg mt-1"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- DNC Activity table -->
+    <div class="card-bg p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-gray-800">
+            <h3 class="text-sm font-semibold">DNC Activity</h3>
+            <span class="text-[10px] text-gray-500" id="dnc-count">— records</span>
+        </div>
+        <div class="mb-3 flex gap-2">
+            <div class="relative flex-1">
+                <i class="fa-solid fa-search text-gray-600 absolute left-3 top-2.5 text-[10px]"></i>
+                <input id="dncSearchInput" type="text" placeholder="Search name or email..." oninput="filterDNC()"
+                    class="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-[11px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#e8533a]">
+            </div>
+            <select id="dncFilterSel" onchange="filterDNC()" class="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300 focus:outline-none focus:border-[#e8533a]">
+                <option value="all">All Reasons</option>
+                <option value="unsubscribed">Unsubscribed</option>
+                <option value="bounced">Bounced</option>
+            </select>
+        </div>
+        <div class="overflow-y-auto style-scrollbar" style="max-height:420px;">
+            <table class="w-full text-[11px] text-left">
+                <thead class="sticky top-0 bg-[#1a1d26]">
+                    <tr class="text-blue-400 border-b border-gray-800">
+                        <th class="pb-2 font-semibold">NAME</th>
+                        <th class="pb-2 font-semibold">EMAIL</th>
+                        <th class="pb-2 font-semibold">REASON</th>
+                        <th class="pb-2 font-semibold">COMMENTS</th>
+                        <th class="pb-2 font-semibold text-center">DNC DATE</th>
+                    </tr>
+                </thead>
+                <tbody id="dncBody" class="divide-y divide-gray-800/30"></tbody>
+            </table>
+        </div>
+        <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-800">
+            <span id="dncPageInfo" class="text-[10px] text-gray-500"></span>
+            <div class="flex gap-1">
+                <button onclick="dncPrevPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                <button onclick="dncNextPage()" class="text-[10px] text-gray-400 hover:text-white bg-gray-800 px-3 py-1 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+</div><!-- end page-dnc -->
 
 </body>
 </html>
