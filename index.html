@@ -1901,12 +1901,25 @@ function handleNurtureCSVUpload(event) {
     reader.readAsText(file);
 }
 
-// Extracts the email group number ("001") and variant letter ("A"/"B") from a name like
-// "RA - Welcome Email - 001 A". Falls back gracefully if the naming pattern differs.
+// Extracts the email group number ("005") and variant letter ("A"/"B") from a name.
+// Two formats are supported:
+//   1) Live API format:  "25006-005 B | Nurture | Operator Spotlight"
+//      -> groupId "005", variant "B", baseName "Operator Spotlight"
+//   2) Legacy/manual-upload format: "RA - Welcome Email - 001 A" (variant trails the string)
+//      -> groupId "001", variant "A", baseName "RA - Welcome Email - 001"
 function parseNurtureName(name) {
-    const variantMatch = name.trim().match(/\s([A-Z])$/); // trailing " A" or " B"
+    const trimmed = (name || '').trim();
+
+    // Live format: "<code>-<number> <VARIANT> | <category> | <label>"
+    const pipeMatch = trimmed.match(/^\S+?-(\d+)\s+([A-Z])\s*\|\s*[^|]*\|\s*(.+)$/);
+    if (pipeMatch) {
+        return { groupId: pipeMatch[1], baseName: pipeMatch[3].trim(), variant: pipeMatch[2] };
+    }
+
+    // Legacy fallback: trailing " A" or " B"
+    const variantMatch = trimmed.match(/\s([A-Z])$/);
     const variant = variantMatch ? variantMatch[1] : 'A';
-    const baseName = variantMatch ? name.trim().slice(0, -2).trim() : name.trim();
+    const baseName = variantMatch ? trimmed.slice(0, -2).trim() : trimmed;
     const numMatch = baseName.match(/(\d{3,})/); // e.g. "001"
     const groupId = numMatch ? numMatch[1] : baseName;
     return { groupId, baseName, variant };
