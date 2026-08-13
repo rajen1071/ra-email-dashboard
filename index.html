@@ -3248,8 +3248,18 @@ async function fetchAllReports() {
         const toEl = document.getElementById('api-date-to');
         if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
     } catch(e) {}
-    // Auto-fetch on page load
-    window.addEventListener('DOMContentLoaded', () => fetchAllReports());
+    // NOTE: the auto-fetch-on-load call used to live here, wired to the
+    // 'DOMContentLoaded' event, running in parallel with the 'load' event
+    // listener below (which calls loadAppDataFromStorage()). Since both
+    // fire close together but fetchAllReports() takes several seconds
+    // (multiple sequential report fetches + retry backoff), the two would
+    // race: loadAppDataFromStorage() could fire AFTER a report had already
+    // been freshly parsed (e.g. Report 10 / Form Submissions) and silently
+    // overwrite the fresh in-memory data with a stale localStorage snapshot
+    // — which then got re-saved, making the stale value "stick" permanently.
+    // Fetching is now triggered from the single 'load' handler below, always
+    // AFTER loadAppDataFromStorage() has finished, so there is only one
+    // deterministic init sequence and fetchAllReports() always has the last word.
 })();
 
 // ===== END MAUTIC API REFRESH SYSTEM =====
@@ -3437,7 +3447,20 @@ function renderSignupKPIs() {
 }
 
 // ===== INIT =====
-window.addEventListener('load', () => { loadAppDataFromStorage(); showHome(); renderNLList(); if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0); renderNurturing(); renderDNC(); });
+// Single, deterministic init sequence (fixes the old race condition):
+// 1) Paint instantly from whatever was cached in localStorage last time.
+// 2) THEN kick off the fresh Mautic API fetch — it always runs last, so its
+//    results (including Form Submissions / Report 10) are never silently
+//    clobbered by loadAppDataFromStorage() anymore.
+window.addEventListener('load', () => {
+    loadAppDataFromStorage();
+    showHome();
+    renderNLList();
+    if (nlWeeks.length) selectNLWeek(nlSelectedWeek || 0);
+    renderNurturing();
+    renderDNC();
+    fetchAllReports();
+});
 </script>
 
 <!-- ===== NEWSLETTER PAGE ===== -->
