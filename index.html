@@ -1582,12 +1582,11 @@ function computeEngagementFromRecipients() {
 }
 
 // Direct JSON processor for Report 15 — skips CSV roundtrip.
+// NOTE: this is the function actually wired into the live fetchAllReports()
+// pipeline for report 15 (parseRecipientsCSV above is only used for the
+// legacy manual-CSV-upload fallback) — so it needs the same robust name
+// matching as parseEngagementCSV/parseRecipientsCSV, not the old exact-match.
 function processRecipientsJson(rows) {
-    const nameToCategory = {};
-    Object.keys(categoryToEngagementName).forEach(cat => {
-        nameToCategory[categoryToEngagementName[cat]] = cat;
-    });
-
     const groupedCat = {};
     const groupedNL  = {};
 
@@ -1600,7 +1599,7 @@ function processRecipientsJson(rows) {
         const read    = parseInt(r.is_read)    === 1 ? 'Yes' : 'No';
         const clicked = parseInt(r.unique_hits) >  0 ? 'Yes' : 'No';
 
-        const category = nameToCategory[rawName];
+        const category = mapEngagementNameToCategory(rawName);
         if (category) {
             if (!groupedCat[category]) groupedCat[category] = [];
             groupedCat[category].push({ email, sent, read, clicked });
