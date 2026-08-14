@@ -1396,8 +1396,8 @@ const catNavIds = {
     'Form Submission Email':'nav-cat-formsub', 'Internal Email':'nav-cat-internal'
 };
 
-// Maps a category's display name to the exact "Name" value used in the
-// All-Engagement-Email-Report CSV (the pre-aggregated totals source).
+// Maps a category's display name to the exact "Name" value used in OLDER
+// manual-CSV-export All-Engagement-Email-Report files (kept for backward compat).
 const categoryToEngagementName = {
     'Sign Up':               'Gold Membership with Restaurant Association',
     'Follow Up Email':       'Follow up - Gold Membership',
@@ -1411,6 +1411,43 @@ const categoryToEngagementName = {
     'Form Submission Email': 'Email - After Form Submission',
     'Internal Email':        'Internal Email to Team'
 };
+const _legacyEngagementExactMap = {};
+Object.keys(categoryToEngagementName).forEach(cat => {
+    _legacyEngagementExactMap[categoryToEngagementName[cat]] = cat;
+});
+
+// Maps an engagement email's raw "Name" (e.name) to one of our 11 category
+// display names. The LIVE Mautic API returns names like:
+//   "25004-001 | Jobs | Job Alert Email | Jobs with Restaurant Association"
+// i.e. a numeric code + type + subtype prefix in front of the descriptive
+// suffix — so an exact-string match against the old hardcoded names (above)
+// never matches and every category silently shows no data. This does a
+// keyword match instead, checked first against the old exact names (so
+// legacy manual CSV uploads still work), then falling back to substring
+// matching against the live format. Returns null for emails that aren't
+// part of Email-By-Category at all (e.g. "Job Applied" confirmation/
+// notification emails, which belong to the Registration flow instead).
+function mapEngagementNameToCategory(rawName) {
+    const trimmed = (rawName || '').trim();
+    if (_legacyEngagementExactMap[trimmed]) return _legacyEngagementExactMap[trimmed];
+
+    const n = trimmed.toLowerCase();
+    if (n.includes('gold member onboarding') || n.includes('gold membership with restaurant association')) {
+        if (n.includes('follow')) return 'Follow Up Email';
+        return 'Sign Up'; // Welcome Email / default
+    }
+    if (n.includes('follow up') && n.includes('gold membership')) return 'Follow Up Email';
+    if (n.includes('news with restaurant association')) return 'News';
+    if (n.includes('resources with restaurant association')) return 'Resources';
+    if (n.includes('jobs with restaurant association')) return 'Jobs';
+    if (n.includes('contact us with restaurant association')) return 'Contact Us';
+    if (n.includes('chomp show') && n.includes('media')) return 'Chomp Show';
+    if (n.includes('blogs/topics with restaurant association') || n.includes('blogs/topics')) return 'Blog';
+    if (n.includes('academy/training with restaurant association') || n.includes('academy/training')) return 'Academy';
+    if (n.includes('after form submission')) return 'Form Submission Email';
+    if (n.includes('internal email')) return 'Internal Email';
+    return null; // e.g. Job Applied confirmation/notification emails — not an Email-By-Category item
+}
 // Order categories should appear in (home list + sidebar)
 const categoryOrder = ['Sign Up','Follow Up Email','News','Resources','Jobs','Contact Us','Chomp Show','Blog','Academy','Form Submission Email','Internal Email'];
 
@@ -1432,17 +1469,11 @@ function parseEngagementCSV(text) {
     const bounceIdx = headers.findIndex(h => h === 'bounced');
     const unsubIdx  = headers.findIndex(h => h === 'unsubscribed');
 
-    // Build a reverse lookup: engagement CSV "Name" -> our category display name
-    const nameToCategory = {};
-    Object.keys(categoryToEngagementName).forEach(cat => {
-        nameToCategory[categoryToEngagementName[cat]] = cat;
-    });
-
     for (let i = 1; i < allRows.length; i++) {
         const cols = allRows[i];
         const rawName = (cols[nameIdx] || '').trim();
         if (!rawName) continue;
-        const category = nameToCategory[rawName];
+        const category = mapEngagementNameToCategory(rawName);
         if (!category) continue; // unrecognized row, skip
 
         engagementData[category] = {
@@ -1498,11 +1529,6 @@ function parseRecipientsCSV(text) {
     // strings the rest of the UI (badges, filters) already expects.
     const toYesNo = v => (parseInt(v) > 0 || /^true$/i.test(v || '')) ? 'Yes' : 'No';
 
-    const nameToCategory = {};
-    Object.keys(categoryToEngagementName).forEach(cat => {
-        nameToCategory[categoryToEngagementName[cat]] = cat;
-    });
-
     const groupedCat = {};
     const groupedNL = {};
     for (let i = 1; i < allRows.length; i++) {
@@ -1517,7 +1543,7 @@ function parseRecipientsCSV(text) {
         const read = readIdx > -1 ? toYesNo((cols[readIdx] || '').trim()) : null;
         const clicked = clickedIdx > -1 ? toYesNo((cols[clickedIdx] || '').trim()) : null;
 
-        const category = nameToCategory[rawName];
+        const category = mapEngagementNameToCategory(rawName);
         if (category) {
             if (!groupedCat[category]) groupedCat[category] = [];
             groupedCat[category].push({ email, sent, read, clicked });
